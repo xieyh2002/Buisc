@@ -200,7 +200,8 @@ impl Ui {
                 cr.set_source_rgb(0.80, 0.80, 0.83);
                 for y in 0..7 {
                     for x in 0..7 {
-                        let finder = (x < 2 && y < 2) || (x > 4 && y < 2) || (x < 2 && y > 4);
+                        let finder =
+                            matches!((x, y), (0..=1, 0..=1) | (5..=6, 0..=1) | (0..=1, 5..=6));
                         if finder || (x + y % 3) % 3 == 0 {
                             cr.rectangle(
                                 left + x as f64 * cell + cell * 0.12,

@@ -642,10 +642,7 @@ impl AccountClient {
             .get("bili_jct")
             .cloned()
             .ok_or_else(|| "登录响应缺少 bili_jct".to_owned())?;
-        if !cookies
-            .get("SESSDATA")
-            .is_some_and(|value| !value.is_empty())
-        {
+        if cookies.get("SESSDATA").is_none_or(|value| value.is_empty()) {
             return Err("登录响应缺少 SESSDATA".to_owned());
         }
         let session = Session {
@@ -841,10 +838,10 @@ impl Session {
     }
 
     fn cookie_header(&self) -> Option<String> {
-        if !self
+        if self
             .cookies
             .get("SESSDATA")
-            .is_some_and(|value| !value.is_empty())
+            .is_none_or(|value| value.is_empty())
         {
             return None;
         }

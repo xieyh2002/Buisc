@@ -29,9 +29,9 @@
 
 ```sh
 # Debian / Ubuntu
-sudo apt install ./buisc_0.1.0_amd64.deb
+sudo apt install ./buisc_0.1.1_amd64.deb
 # Fedora（下载文件名中的 x86_64 对应 amd64）
-sudo dnf install ./buisc-0.1.0-1.x86_64.rpm
+sudo dnf install ./buisc-0.1.1-1.x86_64.rpm
 ```
 
 ## 编译与运行
