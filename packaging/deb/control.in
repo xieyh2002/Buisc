@@ -1,0 +1,11 @@
+Package: buisc
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: @MAINTAINER@
+Installed-Size: @INSTALLED_SIZE@
+Depends: libc6 (>= 2.39), libglib2.0-0t64 (>= 2.80), libgtk-4-1 (>= 4.8), libgstreamer1.0-0 (>= 1.20), gstreamer1.0-plugins-base (>= 1.20), gstreamer1.0-plugins-good (>= 1.20), gstreamer1.0-plugins-bad (>= 1.20), gstreamer1.0-libav (>= 1.20), hicolor-icon-theme
+Section: sound
+Priority: optional
+Description: Lightweight native Bilibili audio player for Linux
+ Buisc is a GTK4 and GStreamer based desktop music player for
+ Bilibili audio.

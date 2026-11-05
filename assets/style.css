@@ -1,0 +1,661 @@
+window,
+window.background {
+  background-color: #fff9fb;
+  color: #18191c;
+  font-family: "Inter", "Noto Sans CJK SC", "Noto Sans", sans-serif;
+  font-size: 13px;
+}
+
+.sidebar {
+  background-color: #fff3f7;
+  background-image: none;
+  color: #18191c;
+  border-right: 1px solid #f2dfe6;
+}
+
+.brand {
+  color: #18191c;
+  font-size: 27px;
+  font-weight: 800;
+}
+
+.tagline {
+  color: #9499a0;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.section {
+  color: #9499a0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.navigation {
+  margin: 0 12px;
+  padding: 0;
+  background-color: transparent;
+  background-image: none;
+  color: #18191c;
+  border: none;
+  box-shadow: none;
+}
+
+.navigation row {
+  margin: 1px 0;
+  padding: 0;
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+.navigation row:hover {
+  background-color: rgba(251, 114, 153, 0.09);
+  color: #18191c;
+}
+
+.navigation row:selected {
+  background-color: #fb7299;
+  background-image: none;
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(251, 114, 153, 0.2);
+}
+
+.navigation row:selected:hover {
+  background-color: #f25d8b;
+}
+
+button {
+  min-height: 20px;
+  padding: 7px 12px;
+  background-color: #ffffff;
+  background-image: none;
+  color: #18191c;
+  border: 1px solid #dfcbd2;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(29, 29, 31, 0.055);
+  text-shadow: none;
+  outline: none;
+}
+
+button:hover {
+  background-color: #fff2f6;
+  color: #18191c;
+  border-color: #d6bfc8;
+}
+
+button:active,
+button:checked {
+  background-color: #ffe8ef;
+  background-image: none;
+  color: #18191c;
+  border-color: #d6bfc8;
+  box-shadow: none;
+}
+
+button:focus {
+  border-color: rgba(0, 174, 236, 0.75);
+  box-shadow: 0 0 0 2px rgba(0, 174, 236, 0.14);
+}
+
+button:disabled {
+  background-color: #fff2f6;
+  color: #9499a0;
+  border-color: #f2dfe6;
+  box-shadow: none;
+}
+
+button.primary {
+  background-color: #fb7299;
+  background-image: none;
+  color: #ffffff;
+  border-color: #fb7299;
+  box-shadow: 0 2px 6px rgba(251, 114, 153, 0.2);
+}
+
+button.primary:hover {
+  background-color: #f25d8b;
+  border-color: #f25d8b;
+}
+
+button.primary:active,
+button.primary:checked {
+  background-color: #e75f87;
+  border-color: #e75f87;
+  box-shadow: none;
+}
+
+button.primary:focus {
+  border-color: #00aeec;
+  box-shadow: 0 0 0 2px rgba(0, 174, 236, 0.2);
+}
+
+button.secondary,
+button.compact-icon {
+  background-color: #fff2f6;
+  color: #18191c;
+  border-color: #f2dfe6;
+  box-shadow: none;
+}
+
+button.secondary:hover,
+button.compact-icon:hover {
+  background-color: #ffe8ef;
+  border-color: #dfcbd2;
+}
+
+button.compact-icon {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+button.sidebar-button {
+  padding: 7px 10px;
+  background-color: transparent;
+  background-image: none;
+  color: #18191c;
+  border: none;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+button.sidebar-button:hover {
+  background-color: rgba(251, 114, 153, 0.09);
+}
+
+button.sidebar-button:active,
+button.sidebar-button:checked {
+  background-color: rgba(251, 114, 153, 0.1);
+  color: #fb7299;
+}
+
+button.sidebar-button:focus {
+  border: none;
+  box-shadow: 0 0 0 2px rgba(0, 174, 236, 0.18);
+}
+
+searchentry,
+entry {
+  min-height: 22px;
+  padding: 8px 11px;
+  background-color: #ffffff;
+  background-image: none;
+  color: #18191c;
+  border: 1px solid #dfcbd2;
+  border-radius: 10px;
+  box-shadow: none;
+  outline: none;
+}
+
+searchentry:hover,
+entry:hover {
+  border-color: #d6bfc8;
+}
+
+searchentry:focus,
+entry:focus {
+  border-color: rgba(0, 174, 236, 0.75);
+  box-shadow: 0 0 0 2px rgba(0, 174, 236, 0.12);
+}
+
+searchentry text,
+entry text {
+  background-color: transparent;
+  background-image: none;
+  color: #18191c;
+  box-shadow: none;
+}
+
+searchentry image,
+entry image {
+  color: #9499a0;
+}
+
+.eyebrow,
+.page-kicker {
+  color: #9499a0;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.heading {
+  color: #18191c;
+  font-size: 31px;
+  font-weight: 800;
+}
+
+.muted {
+  color: #9499a0;
+  font-size: 12px;
+}
+
+.hero {
+  background-color: #fff0f6;
+  background-image: linear-gradient(135deg, #fff0f6 0%, #ffe6ef 52%, #eaf9ff 100%);
+  color: #18191c;
+  border: 1px solid rgba(0, 174, 236, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(251, 114, 153, 0.075);
+}
+
+.hero-title {
+  color: #18191c;
+  font-size: 28px;
+  font-weight: 750;
+}
+
+.hero-subtitle {
+  color: rgba(24, 25, 28, 0.64);
+  font-size: 12px;
+}
+
+.disc {
+  color: rgba(251, 114, 153, 0.26);
+  font-size: 90px;
+}
+
+columnview.tracks,
+columnview.tracks listview,
+columnview.tracks scrolledwindow,
+columnview.tracks viewport {
+  background-color: transparent;
+  background-image: none;
+  color: #18191c;
+  border: none;
+  box-shadow: none;
+}
+
+columnview.tracks header {
+  background-color: #f7fbfd;
+  background-image: none;
+  color: #9499a0;
+  border: none;
+  border-bottom: 1px solid #dcebf1;
+  box-shadow: none;
+}
+
+columnview.tracks header button {
+  min-height: 0;
+  padding: 6px 8px;
+  background-color: transparent;
+  background-image: none;
+  color: #9499a0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+columnview.tracks header button:hover {
+  background-color: transparent;
+  color: #18191c;
+}
+
+columnview.tracks row {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  border-radius: 9px;
+  box-shadow: none;
+}
+
+columnview.tracks row:hover {
+  background-color: rgba(251, 114, 153, 0.075);
+}
+
+columnview.tracks row:selected {
+  background-color: #fb7299;
+  background-image: none;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+columnview.tracks row:selected:hover {
+  background-color: #f25d8b;
+}
+
+columnview.tracks row:selected .song-title,
+columnview.tracks row:selected .muted {
+  color: #ffffff;
+}
+
+.song-title {
+  color: #18191c;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.status {
+  color: #9499a0;
+  font-size: 11px;
+}
+
+.player {
+  background-color: #fff9fb;
+  background-image: none;
+  color: #18191c;
+  border: none;
+  border-top: 1px solid #f2dfe6;
+  box-shadow: 0 -3px 10px rgba(251, 114, 153, 0.045);
+}
+
+.album {
+  background-color: #fb7299;
+  background-image: linear-gradient(145deg, #ffacc2 0%, #fb7299 52%, #00aeec 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(251, 114, 153, 0.2);
+  font-size: 28px;
+}
+
+.video-cover {
+  border-radius: 10px;
+}
+
+button.transport {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 5px;
+  background-color: transparent;
+  background-image: none;
+  color: #18191c;
+  border: none;
+  border-radius: 8px;
+  box-shadow: none;
+  font-size: 21px;
+}
+
+button.transport:hover {
+  background-color: #fff2f6;
+}
+
+button.transport:active {
+  background-color: #ffe8ef;
+}
+
+button.transport:focus {
+  box-shadow: 0 0 0 2px rgba(0, 174, 236, 0.2);
+}
+
+button.play {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 5px;
+  background-color: #fb7299;
+  background-image: none;
+  color: #ffffff;
+  border: none;
+  border-radius: 24px;
+  box-shadow: 0 2px 7px rgba(251, 114, 153, 0.24);
+  font-size: 18px;
+}
+
+button.play:hover {
+  background-color: #f25d8b;
+}
+
+button.play:active {
+  background-color: #e75f87;
+  box-shadow: none;
+}
+
+button.play:focus {
+  box-shadow: 0 0 0 3px rgba(0, 174, 236, 0.2);
+}
+
+button.small {
+  min-height: 0;
+  padding: 5px 8px;
+  background-color: #fff2f6;
+  color: #9499a0;
+  border: 1px solid #f2dfe6;
+  border-radius: 8px;
+  box-shadow: none;
+  font-size: 10px;
+}
+
+button.small:hover {
+  background-color: #ffe8ef;
+  color: #18191c;
+}
+
+scale {
+  margin: 0;
+  padding: 0;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+scale trough {
+  min-height: 4px;
+  margin: 0;
+  padding: 0;
+  background-color: #dcebf1;
+  background-image: none;
+  border: none;
+  border-radius: 999px;
+  box-shadow: none;
+}
+
+scale highlight {
+  margin: 0;
+  padding: 0;
+  background-color: #00aeec;
+  background-image: none;
+  border: none;
+  border-radius: 999px;
+  box-shadow: none;
+}
+
+scale slider {
+  min-width: 12px;
+  min-height: 12px;
+  margin: 0;
+  padding: 0;
+  background-color: #ffffff;
+  background-image: none;
+  border: 1px solid #d6bfc8;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(29, 29, 31, 0.18);
+}
+
+scale slider:hover {
+  background-color: #ffffff;
+  border-color: #00aeec;
+}
+
+scale slider:focus {
+  border-color: #00aeec;
+  box-shadow: 0 0 0 2px rgba(0, 174, 236, 0.18);
+}
+
+scale:disabled trough {
+  background-color: #eff6f8;
+}
+
+scale:disabled highlight {
+  background-color: #b9dce8;
+}
+
+scale:disabled slider {
+  background-color: #fff2f6;
+  border-color: #dfcbd2;
+  box-shadow: none;
+}
+
+.toolbar {
+  padding: 2px 0;
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+}
+
+headerbar {
+  min-height: 42px;
+  background-color: rgba(255, 249, 251, 0.98);
+  background-image: none;
+  color: #18191c;
+  border: none;
+  border-bottom: 1px solid #f2dfe6;
+  box-shadow: none;
+  text-shadow: none;
+}
+
+headerbar button {
+  box-shadow: none;
+}
+
+.account-card,
+.card {
+  padding: 14px;
+  background-color: #ffffff;
+  background-image: none;
+  color: #18191c;
+  border: 1px solid #f2dfe6;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(29, 29, 31, 0.045);
+}
+
+.metric {
+  color: #18191c;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.card-title {
+  color: #18191c;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.secondary {
+  color: #9499a0;
+}
+
+.title-1 {
+  color: #18191c;
+  font-size: 20px;
+  font-weight: 750;
+}
+
+.title-2 {
+  color: #18191c;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+list,
+listview,
+viewport,
+scrolledwindow {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+}
+
+list > row,
+listview > row {
+  background-image: none;
+  border: none;
+  box-shadow: none;
+}
+
+separator {
+  min-width: 1px;
+  min-height: 1px;
+  background-color: #f2dfe6;
+}
+
+checkbutton check {
+  min-width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  background-color: #ffffff;
+  border: 1px solid #d6bfc8;
+  border-radius: 5px;
+  box-shadow: none;
+}
+
+checkbutton check:checked {
+  background-color: #fb7299;
+  color: #ffffff;
+  border-color: #fb7299;
+}
+
+checkbutton check:focus {
+  box-shadow: 0 0 0 2px rgba(0, 174, 236, 0.16);
+}
+
+popover,
+tooltip {
+  background-color: #ffffff;
+  background-image: none;
+  color: #18191c;
+  border: 1px solid #dfcbd2;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(29, 29, 31, 0.14);
+}
+
+tooltip {
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.dialog,
+window.dialog {
+  background-color: #fff9fb;
+  color: #18191c;
+}
+
+scrollbar {
+  background-color: transparent;
+  border: none;
+}
+
+scrollbar slider {
+  min-width: 6px;
+  min-height: 6px;
+  margin: 2px;
+  background-color: rgba(148, 153, 160, 0.28);
+  border: none;
+  border-radius: 999px;
+}
+
+scrollbar slider:hover {
+  background-color: rgba(148, 153, 160, 0.44);
+}
+
+.dim-label {
+  color: #9499a0;
+}
+
+/* Keep the titlebar and rows compact on small Linux windows. */
+headerbar windowcontrols button { min-width: 18px; min-height: 18px; padding: 4px; margin: 4px; border: none; border-radius: 7px; background: transparent; }
+headerbar windowcontrols button:hover { background-color: #ffe8ef; }
+columnview.tracks cell { padding: 0 4px; }
+button.account-card { background-color: #ffffff; border: 1px solid #f2dfe6; padding: 11px; }
+.window-title { color: #61666d; font-size: 12px; font-weight: 500; }
+
+/* Compact controls anchored to the window corner, above the search area. */
+.corner-window-controls button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 3px;
+  margin: 0 1px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+.corner-window-controls button:hover { background-color: #ffe8ef; }
+.corner-window-controls button.close:hover { background-color: #fb7299; color: #ffffff; }

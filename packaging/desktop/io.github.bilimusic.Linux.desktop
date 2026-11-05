@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Buisc
+GenericName=Bilibili 音频播放器
+Comment=轻量原生 Linux 音乐播放器
+Exec=buisc
+TryExec=buisc
+Icon=io.github.bilimusic.Linux
+Terminal=false
+Categories=AudioVideo;Audio;Music;Player;
+StartupNotify=true
+StartupWMClass=io.github.bilimusic.Linux

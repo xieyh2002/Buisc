@@ -1,0 +1,23 @@
+[
+  {
+    "stage": "idle",
+    "rss_mib": 107.6,
+    "pss_mib": 45.8,
+    "cpu_percent_one_core": 0.0,
+    "sample_seconds": 10.0
+  },
+  {
+    "stage": "playing",
+    "rss_mib": 184.8,
+    "pss_mib": 107.4,
+    "cpu_percent_one_core": 7.8,
+    "sample_seconds": 5.0
+  },
+  {
+    "stage": "paused",
+    "rss_mib": 184.8,
+    "pss_mib": 107.6,
+    "cpu_percent_one_core": 0.0,
+    "sample_seconds": 10.0
+  }
+]

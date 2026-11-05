@@ -1,0 +1,44 @@
+%global debug_package %{nil}
+%global __os_install_post %{nil}
+
+Name:           buisc
+Version:        @VERSION@
+Release:        1
+Summary:        Lightweight native Bilibili audio player for Linux
+License:        MIT
+Packager:       @MAINTAINER@
+AutoReqProv:    no
+
+Requires:       glibc >= 2.39
+Requires:       glib2 >= 2.80
+Requires:       gtk4 >= 4.8
+Requires:       gstreamer1 >= 1.20
+Requires:       gstreamer1-plugins-base >= 1.20
+Requires:       gstreamer1-plugins-good >= 1.20
+Requires:       gstreamer1-plugins-bad-free >= 1.20
+Requires:       (gstreamer1-plugins-libav >= 1.20 or gstreamer1-plugin-libav >= 1.20)
+Requires:       hicolor-icon-theme
+
+%description
+Buisc is a GTK4 and GStreamer based desktop music player for
+Bilibili audio.
+
+%prep
+
+%build
+
+%install
+install -Dpm0755 "%{_buisc_binary}" "%{buildroot}%{_bindir}/buisc"
+install -Dpm0644 "%{_buisc_source_root}/packaging/desktop/io.github.bilimusic.Linux.desktop" \
+    "%{buildroot}%{_datadir}/applications/io.github.bilimusic.Linux.desktop"
+install -Dpm0644 "%{_buisc_source_root}/assets/io.github.bilimusic.Linux.svg" \
+    "%{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.github.bilimusic.Linux.svg"
+install -Dpm0644 "%{_buisc_source_root}/LICENSE" \
+    "%{buildroot}%{_licensedir}/buisc/LICENSE"
+
+%files
+%defattr(-,root,root,-)
+%attr(0755,root,root) %{_bindir}/buisc
+%{_datadir}/applications/io.github.bilimusic.Linux.desktop
+%{_datadir}/icons/hicolor/scalable/apps/io.github.bilimusic.Linux.svg
+%license %{_licensedir}/buisc/LICENSE

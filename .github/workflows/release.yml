@@ -1,0 +1,156 @@
+name: Release packages
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_DEV_DEBUG: 0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }} packages
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          components: rustfmt, clippy
+
+      - name: Install build and packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            dbus-x11 \
+            gstreamer1.0-libav \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            libgtk-4-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer1.0-dev \
+            pkg-config \
+            rpm \
+            xauth \
+            xvfb
+
+      - name: Check tagged version
+        shell: bash
+        run: |
+          cargo_version="$(
+            awk '
+              /^\[package\][[:space:]]*$/ { in_package = 1; next }
+              /^\[/ { in_package = 0 }
+              in_package && /^version[[:space:]]*=/ {
+                value = $0
+                sub(/^[^=]*=[[:space:]]*/, "", value)
+                gsub(/["[:space:]]/, "", value)
+                print value
+                exit
+              }
+            ' Cargo.toml
+          )"
+          if [[ "${GITHUB_REF_NAME}" != "v${cargo_version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version v${cargo_version}" >&2
+            exit 1
+          fi
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        run: xvfb-run -a dbus-run-session -- cargo test --locked
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Build DEB and RPM
+        run: |
+          scripts/package.sh \
+            --format all \
+            --arch "${{ matrix.arch }}" \
+            --binary target/release/bili-music \
+            --output dist
+          (
+            cd dist
+            sha256sum ./*.deb ./*.rpm > "SHA256SUMS-${{ matrix.arch }}"
+          )
+
+      - name: Upload architecture packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: buisc-${{ matrix.arch }}-packages
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download architecture packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: buisc-*-packages
+          merge-multiple: true
+          path: release
+
+      - name: Verify and combine checksums
+        working-directory: release
+        shell: bash
+        run: |
+          for checksums in SHA256SUMS-*; do
+            sha256sum --check "$checksums"
+          done
+
+          mapfile -d '' packages < <(
+            find . -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) \
+              -printf '%f\0' | sort -z
+          )
+          ((${#packages[@]} == 4))
+          sha256sum -- "${packages[@]}" > SHA256SUMS
+
+      - name: Upload release assets with GitHub CLI
+        working-directory: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" ./*.deb ./*.rpm SHA256SUMS --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              ./*.deb ./*.rpm SHA256SUMS \
+              --verify-tag \
+              --generate-notes
+          fi

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>Buisc</title>
+  <defs>
+    <linearGradient id="bg" x1="20" y1="8" x2="109" y2="124" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffa3bf"/>
+      <stop offset="0.46" stop-color="#fb7299"/>
+      <stop offset="1" stop-color="#00aeec"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="27" y1="18" x2="88" y2="111" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.24"/>
+      <stop offset="0.48" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#00aeec" stop-opacity="0.1"/>
+    </linearGradient>
+    <linearGradient id="note" x1="48" y1="29" x2="90" y2="101" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#fff4f6"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="10" width="112" height="112" rx="29" fill="#007fad" opacity="0.18"/>
+  <rect x="8" y="8" width="112" height="112" rx="29" fill="url(#bg)"/>
+  <rect x="8.75" y="8.75" width="110.5" height="110.5" rx="28.25" fill="url(#shine)" stroke="#ffffff" stroke-opacity="0.2" stroke-width="1.5"/>
+  <g fill="#007fad" opacity="0.16" transform="translate(0 2)">
+    <ellipse cx="43" cy="91" rx="14.5" ry="10" transform="rotate(-18 43 91)"/>
+    <ellipse cx="84" cy="81" rx="14.5" ry="10" transform="rotate(-18 84 81)"/>
+    <path d="M52.5 87V43.5l44-10.2v43.2h-7V46.7l-30 7v33.3z"/>
+  </g>
+  <g fill="url(#note)">
+    <ellipse cx="43" cy="89" rx="14.5" ry="10" transform="rotate(-18 43 89)"/>
+    <ellipse cx="84" cy="79" rx="14.5" ry="10" transform="rotate(-18 84 79)"/>
+    <path d="M52.5 85V41.5l44-10.2v43.2h-7V44.7l-30 7v33.3z"/>
+  </g>
+  <path d="M73.5 61.7v15.2" fill="none" stroke="#fb7299" stroke-linecap="round" stroke-opacity="0.07" stroke-width="1"/>
+</svg>

@@ -1,0 +1,13 @@
+/target/
+/dist/
+__pycache__/
+*.py[cod]
+*.tmp
+
+# Runtime data and local diagnostics must never be published.
+/account.json
+/library.json
+/library.recovered.json
+.env
+.env.*
+*.log
