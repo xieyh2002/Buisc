@@ -1,14 +1,29 @@
-# Buisc
+<div align="center">
+  <img src="assets/buisc-logo.png" width="112" height="112" alt="Buisc 粉蓝小电视图标">
+  <h1>Buisc</h1>
+  <p><strong>把哔哩哔哩当作你的曲库。</strong><br>轻量原生 Linux 音乐播放器，免登录在线听，也支持扫码同步收藏和播放记录。</p>
 
-一个用 **Rust + GTK4 + GStreamer** 编写的原生 Bilibili 音频播放器。参考 [HanversionOvO/BiliMusic](https://github.com/HanversionOvO/BiliMusic) 和 [Jmiao11/bili-music](https://github.com/Jmiao11/bili-music) 的使用场景，独立实现 Linux 版本。
+  <p>
+    <a href="https://github.com/xieyh2002/Buisc/releases/latest"><img src="https://img.shields.io/github/v/release/xieyh2002/Buisc?label=release&amp;style=flat-square&amp;color=fb7299" alt="最新版本"></a>
+    <a href="https://github.com/xieyh2002/Buisc/releases"><img src="https://img.shields.io/github/downloads/xieyh2002/Buisc/total?label=downloads&amp;style=flat-square" alt="总下载量"></a>
+    <a href="https://github.com/xieyh2002/Buisc/actions/workflows/release.yml"><img src="https://github.com/xieyh2002/Buisc/actions/workflows/release.yml/badge.svg" alt="发布构建"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/xieyh2002/Buisc?style=flat-square" alt="MIT 许可证"></a>
+    <a href="https://github.com/xieyh2002/Buisc/stargazers"><img src="https://img.shields.io/github/stars/xieyh2002/Buisc?label=stars&amp;style=flat-square" alt="GitHub Stars"></a>
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-007fae?style=flat-square&amp;logo=linux&amp;logoColor=white" alt="Linux amd64 和 arm64">
+    <img src="https://img.shields.io/badge/Rust-1.92%2B-de6538?style=flat-square&amp;logo=rust&amp;logoColor=white" alt="Rust 1.92+">
+    <img src="https://img.shields.io/badge/GTK-4.8%2B-4a86cf?style=flat-square&amp;logo=gtk&amp;logoColor=white" alt="GTK 4.8+">
+    <img src="https://img.shields.io/badge/GStreamer-audio-5c6692?style=flat-square" alt="GStreamer 音频播放">
+  </p>
+  <p><strong><a href="https://github.com/xieyh2002/Buisc/releases/latest">⬇ 下载最新版</a> · <a href="#功能">功能</a> · <a href="#安装">安装</a> · <a href="CONTRIBUTING.md">参与贡献</a> · <a href="CHANGELOG.md">更新日志</a></strong></p>
+  <img src="docs/screenshot.png" width="900" alt="Buisc 音乐热榜界面与底部播放条">
+</div>
 
-采用浅灰侧栏、白色内容区、封面卡片与底部居中的播放条，保留 Bilibili 粉蓝点缀。首页展示热榜封面与精选曲目，点击「完整榜单」可切回列表。应用不内置浏览器，不运行 Python，不加载视频，不持续播放动画。GTK 曲目列表按需创建可见行；音频使用系统 GStreamer 解码，网络缓冲设为 2 MiB，暂停时关闭进度计时器。默认由 GTK 选择界面渲染器，支持 GPU 加速滚动和实时磨砂；可在「设置与备份 → 界面渲染」切换 CPU 兼容模式，完全退出并重新打开后生效。若无法打开界面，可用 `BILI_MUSIC_RENDERER=cairo` 启动。
+## 功能
 
-![运行界面](docs/screenshot.png)
-
-## 已实现
-
-- B 站扫码登录，本机会话持久化、登录失效检测与退出。
+- 无需登录即可在线播放；支持 B 站扫码登录、会话保存、失效检测与退出。
+- 热榜封面首页、平滑滚动和实时毛玻璃播放条。默认由 GTK 选择渲染器，可在「设置与备份 → 界面渲染」切换 CPU 兼容模式，重开后生效。
 - 读取账号收藏夹与 B站历史，选择收藏夹后收藏曲目。
 - 播放时每 30 秒同步历史进度，暂停或切歌时补报，可在设置中关闭。
 - B 站音乐区热榜、自动附加“音乐”的关键词搜索、滚动自动翻页、BV 号或视频链接直达。
@@ -21,7 +36,7 @@
 - 单实例；网络任务在后台执行，搜索和切歌通过请求序号屏蔽过期响应。
 - 资料库原子写入，读入异常时保留原文件并另存恢复资料库。
 
-## 下载与安装
+## 安装
 
 在 [GitHub Releases](https://github.com/xieyh2002/Buisc/releases) 下载对应架构安装包：普通 Intel/AMD 电脑选择 `amd64`（RPM 文件名为 `x86_64`），ARM 电脑选择 `arm64`（RPM 文件名为 `aarch64`）。
 
@@ -107,7 +122,11 @@ cargo clippy --all-targets --locked -j 2 -- -D warnings
 
 播放栏的模式按钮可切换顺序、单曲循环、列表循环与随机播放。下载按钮保存当前歌曲；未播放时保存选中曲目。音频以 M4A 文件保存，不转码。
 
-MIT License。
+## 致谢与许可
+
+项目参考了 [HanversionOvO/BiliMusic](https://github.com/HanversionOvO/BiliMusic) 与 [Jmiao11/bili-music](https://github.com/Jmiao11/bili-music) 的使用场景，独立实现 Linux 版本。
+
+按 [MIT 许可证](LICENSE) 发布。
 
 ## 维护者打包
 
