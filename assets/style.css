@@ -1,16 +1,16 @@
 window,
 window.background {
-  background-color: #fff9fb;
+  background-color: #ffffff;
   color: #18191c;
   font-family: "Inter", "Noto Sans CJK SC", "Noto Sans", sans-serif;
   font-size: 13px;
 }
 
 .sidebar {
-  background-color: #fff3f7;
+  background-color: #f5f5f7;
   background-image: none;
   color: #18191c;
-  border-right: 1px solid #f2dfe6;
+  border-right: 1px solid #e5e5e8;
 }
 
 .brand {
@@ -57,14 +57,13 @@ window.background {
 }
 
 .navigation row:selected {
-  background-color: #fb7299;
-  background-image: none;
-  color: #ffffff;
-  box-shadow: 0 1px 2px rgba(251, 114, 153, 0.2);
+  background-color: #e9e9ed;
+  color: #18191c;
+  font-weight: 650;
 }
 
 .navigation row:selected:hover {
-  background-color: #f25d8b;
+  background-color: #e3e3e8;
 }
 
 button {
@@ -233,29 +232,42 @@ entry image {
   font-size: 12px;
 }
 
-.hero {
-  background-color: #fff0f6;
-  background-image: linear-gradient(135deg, #fff0f6 0%, #ffe6ef 52%, #eaf9ff 100%);
+.discovery-section {
   color: #18191c;
-  border: 1px solid rgba(0, 174, 236, 0.12);
-  border-radius: 12px;
-  box-shadow: 0 4px 14px rgba(251, 114, 153, 0.075);
-}
-
-.hero-title {
-  color: #18191c;
-  font-size: 28px;
+  font-size: 18px;
   font-weight: 750;
 }
 
-.hero-subtitle {
-  color: rgba(24, 25, 28, 0.64);
-  font-size: 12px;
+.feature-title {
+  color: #18191c;
+  font-size: 16px;
+  font-weight: 650;
 }
 
-.disc {
-  color: rgba(251, 114, 153, 0.26);
-  font-size: 90px;
+.discovery-art {
+  background-image: linear-gradient(135deg, #fcebf2, #e8f6fd);
+  border-radius: 8px;
+}
+
+button.discovery-button {
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 8px;
+}
+
+button.discovery-button:hover {
+  background-color: #f5f5f7;
+}
+
+button.discovery-button:focus-visible {
+  border-color: #00aeec;
+}
+
+.discovery-track {
+  border-top: 1px solid #e8e8eb;
+  padding: 5px 3px;
 }
 
 columnview.tracks,
@@ -334,12 +346,40 @@ columnview.tracks row:selected .muted {
 }
 
 .player {
-  background-color: #fff9fb;
-  background-image: none;
+  background-color: transparent;
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.37), rgba(255, 255, 255, 0) 55%),
+    linear-gradient(112deg, rgba(255, 241, 248, 0.60),
+      rgba(255, 255, 255, 0.56) 49%, rgba(235, 247, 255, 0.63));
   color: #18191c;
-  border: none;
-  border-top: 1px solid #f2dfe6;
-  box-shadow: 0 -3px 10px rgba(251, 114, 153, 0.045);
+  border: 1px solid rgba(193, 196, 208, 0.63);
+  border-radius: 22px;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.86), 0 5px 17px rgba(24, 25, 28, 0.13);
+  padding: 7px 13px;
+}
+
+.player .transport-group button.transport,
+.player .player-actions button.transport {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 3px;
+}
+
+.player .player-actions {
+  border-left: 1px solid rgba(109, 115, 130, 0.17);
+  padding-left: 8px;
+}
+
+.player .player-mode {
+  min-width: 55px;
+  padding: 4px;
+  background-color: rgba(255, 255, 255, 0.55);
+}
+
+.player .player-clock {
+  color: #646871;
+  font-size: 11px;
+  font-feature-settings: "tnum";
 }
 
 .album {

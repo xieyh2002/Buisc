@@ -6,7 +6,6 @@ pub(super) enum Icon {
     Pause,
     Previous,
     Next,
-    Music,
     Heart,
     Search,
     Home,
@@ -54,22 +53,6 @@ fn paint(cr: &cairo::Context, icon: Icon) {
             cr.rectangle(17., 5., 2.4, 14.);
             let _ = cr.fill();
             let _ = cr.restore();
-        }
-        Icon::Music => {
-            line(cr, &[(9., 17.), (9., 6.), (19., 3.5), (19., 15.)]);
-            line(cr, &[(9., 9.), (19., 6.5)]);
-            cr.save().ok();
-            cr.translate(6., 17.);
-            cr.scale(3.5, 2.3);
-            cr.arc(0., 0., 1., 0., std::f64::consts::TAU);
-            let _ = cr.fill();
-            cr.restore().ok();
-            cr.save().ok();
-            cr.translate(16., 15.);
-            cr.scale(3.5, 2.3);
-            cr.arc(0., 0., 1., 0., std::f64::consts::TAU);
-            let _ = cr.fill();
-            cr.restore().ok();
         }
         Icon::Heart => {
             cr.move_to(12., 20.);
@@ -157,7 +140,7 @@ pub(super) fn widget(icon: Icon, size: i32, pink: bool) -> gtk::DrawingArea {
             .and_downcast::<gtk::ListBoxRow>()
             .is_some_and(|row| row.is_selected())
         {
-            cr.set_source_rgb(1., 1., 1.);
+            cr.set_source_rgb(0., 0.58, 0.79);
         } else if pink {
             cr.set_source_rgb(0.984, 0.447, 0.600);
         } else {
@@ -177,48 +160,33 @@ pub(super) fn set_play(button: &gtk::Button, playing: bool) {
     button.set_child(Some(&drawing));
     button.set_tooltip_text(Some(if playing { "暂停" } else { "播放" }));
 }
+thread_local! {
+    // Rasterized from the same SVG as the desktop and tray icons.
+    static LOGO: gtk::gdk_pixbuf::Pixbuf = gtk::gdk_pixbuf::Pixbuf::from_read(
+        std::io::Cursor::new(include_bytes!("../../assets/buisc-logo.png"))
+    ).expect("embedded Buisc icon");
+}
+
 pub(super) fn artwork(size: i32) -> gtk::DrawingArea {
     let drawing = gtk::DrawingArea::new();
     drawing.set_content_width(size);
     drawing.set_content_height(size);
     drawing.set_valign(gtk::Align::Center);
     drawing.set_halign(gtk::Align::Center);
-    drawing.set_draw_func(|_, cr, w, h| {
-        let s = w.min(h) as f64;
-        cr.translate((w as f64 - s) / 2., (h as f64 - s) / 2.);
-        cr.scale(s / 120., s / 120.);
-        let r = 23.;
-        cr.new_sub_path();
-        cr.arc(120. - r, r, r, -std::f64::consts::FRAC_PI_2, 0.);
-        cr.arc(120. - r, 120. - r, r, 0., std::f64::consts::FRAC_PI_2);
-        cr.arc(
-            r,
-            120. - r,
-            r,
-            std::f64::consts::FRAC_PI_2,
-            std::f64::consts::PI,
-        );
-        cr.arc(
-            r,
-            r,
-            r,
-            std::f64::consts::PI,
-            3. * std::f64::consts::FRAC_PI_2,
-        );
-        cr.close_path();
-        let gradient = cairo::LinearGradient::new(0., 0., 120., 120.);
-        gradient.add_color_stop_rgb(0., 1., 0.675, 0.760);
-        gradient.add_color_stop_rgb(0.52, 0.984, 0.447, 0.600);
-        gradient.add_color_stop_rgb(1., 0., 0.682, 0.925);
-        let _ = cr.set_source(&gradient);
-        let _ = cr.fill();
-        cr.set_source_rgba(1., 1., 1., 0.08);
-        cr.arc(94., 27., 55., 0., std::f64::consts::TAU);
-        let _ = cr.fill();
-        cr.translate(27., 24.);
-        cr.scale(2.7, 2.7);
-        cr.set_source_rgb(1., 1., 1.);
-        paint(cr, Icon::Music);
+    drawing.set_draw_func(|_, cr, width, height| {
+        let size = f64::from(width.min(height));
+        LOGO.with(|pixbuf| {
+            cr.translate(
+                (f64::from(width) - size) / 2.,
+                (f64::from(height) - size) / 2.,
+            );
+            cr.scale(
+                size / f64::from(pixbuf.width()),
+                size / f64::from(pixbuf.height()),
+            );
+            cr.set_source_pixbuf(pixbuf, 0., 0.);
+            let _ = cr.paint();
+        });
     });
     drawing
 }

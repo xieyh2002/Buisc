@@ -548,7 +548,7 @@ fn music_search_keyword(query: &str) -> String {
     }
 }
 
-fn cover_thumbnail_url(value: &str) -> Result<Url, String> {
+fn cover_thumbnail_url(value: &str, wide: bool) -> Result<Url, String> {
     let mut url = Url::parse(&normalize_cover(value)).map_err(|_| "封面地址无效")?;
     let host = url.host_str().unwrap_or_default();
     if url.scheme() != "https"
@@ -560,7 +560,8 @@ fn cover_thumbnail_url(value: &str) -> Result<Url, String> {
         return Err("封面地址无效".into());
     }
     let original = url.path().split('@').next().unwrap_or_default();
-    url.set_path(&format!("{original}@160w_160h_1c.jpg"));
+    let size = if wide { "480w_270h" } else { "160w_160h" };
+    url.set_path(&format!("{original}@{size}_1c.jpg"));
     url.set_query(None);
     url.set_fragment(None);
     Ok(url)
@@ -701,7 +702,11 @@ impl BiliClient {
     }
 
     pub fn cover_thumbnail(&self, source: &str) -> Result<Vec<u8>, String> {
-        let url = cover_thumbnail_url(source)?;
+        self.cover_image(source, false)
+    }
+
+    pub fn cover_image(&self, source: &str, wide: bool) -> Result<Vec<u8>, String> {
+        let url = cover_thumbnail_url(source, wide)?;
         // Public CDN only: no account cookies, disk cache or full-resolution images.
         let response = self
             .client
@@ -1576,7 +1581,7 @@ mod cover_tests {
     #[test]
     fn thumbnail_uses_small_public_cdn_image() {
         assert_eq!(
-            cover_thumbnail_url("//i0.hdslb.com/bfs/archive/a.jpg@640w.jpg?x=1")
+            cover_thumbnail_url("//i0.hdslb.com/bfs/archive/a.jpg@640w.jpg?x=1", false)
                 .unwrap()
                 .as_str(),
             "https://i0.hdslb.com/bfs/archive/a.jpg@160w_160h_1c.jpg"
@@ -1587,7 +1592,7 @@ mod cover_tests {
             "https://user@i0.hdslb.com/a.jpg",
             "https://i0.hdslb.com:8443/a.jpg",
         ] {
-            assert!(cover_thumbnail_url(source).is_err());
+            assert!(cover_thumbnail_url(source, false).is_err());
         }
     }
 }

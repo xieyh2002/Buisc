@@ -10,10 +10,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
-    sync::{
-        OnceLock,
-        atomic::{AtomicU32, Ordering},
-    },
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 const ITEM_ID: &str = "io.github.bilimusic.Linux";
@@ -151,7 +148,6 @@ const XML: &str = r#"
 "#;
 
 static NEXT_INSTANCE: AtomicU32 = AtomicU32::new(1);
-static ICON_BYTES: OnceLock<Vec<u8>> = OnceLock::new();
 
 /// A live StatusNotifierItem owned by the application's GLib main context.
 pub struct Tray {
@@ -859,34 +855,9 @@ fn restore_window(state: &TrayState) {
 
 fn icon_pixmap() -> Vec<Pixmap> {
     const SIZE: i32 = 32;
-    let bytes = ICON_BYTES.get_or_init(|| {
-        let mut bytes = vec![0; (SIZE * SIZE * 4) as usize];
-        for y in 0..SIZE {
-            for x in 0..SIZE {
-                let dx = x - (SIZE - 1) / 2;
-                let dy = y - (SIZE - 1) / 2;
-                let inside = dx * dx + dy * dy <= 15 * 15;
-                let note_head = {
-                    let hx = x - 14;
-                    let hy = y - 23;
-                    hx * hx + 2 * hy * hy <= 18
-                };
-                let stem = (18..=21).contains(&x) && (7..=23).contains(&y);
-                let flag = (18..=26).contains(&x) && (7..=13).contains(&y) && y <= 7 + (x - 18) / 2;
-                let color = if note_head || stem || flag {
-                    [255, 255, 255, 255]
-                } else if inside {
-                    [255, 251, 114, 153]
-                } else {
-                    [0, 0, 0, 0]
-                };
-                let offset = ((y * SIZE + x) * 4) as usize;
-                bytes[offset..offset + 4].copy_from_slice(&color);
-            }
-        }
-        bytes
-    });
-    vec![(SIZE, SIZE, bytes.clone())]
+    // 32 × 32 ARGB pixels rendered from the desktop SVG at build preparation.
+    let bytes = include_bytes!("../assets/tray-icon.argb");
+    vec![(SIZE, SIZE, bytes.to_vec())]
 }
 
 #[cfg(test)]

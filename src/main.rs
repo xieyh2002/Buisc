@@ -2,6 +2,7 @@ mod account;
 mod api;
 mod audio;
 mod download;
+mod graphics;
 mod mpris;
 mod storage;
 mod tray;
@@ -9,13 +10,8 @@ mod ui;
 
 use gtk::{gio, glib, prelude::*};
 fn main() -> glib::ExitCode {
+    graphics::configure_startup();
     glib::set_application_name("Buisc");
-    // This runs before GTK/GStreamer or worker threads are initialized. The Cairo
-    // renderer avoids a persistent GPU context; users may override the choice.
-    let renderer = std::env::var("BILI_MUSIC_RENDERER").unwrap_or_else(|_| "cairo".into());
-    unsafe {
-        std::env::set_var("GSK_RENDERER", renderer);
-    }
     if let Err(e) = gstreamer::init() {
         eprintln!("无法初始化音频组件：{e}");
         return glib::ExitCode::FAILURE;

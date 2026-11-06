@@ -1,6 +1,9 @@
 mod account_ui;
+mod discover;
 mod download_ui;
+mod glass;
 mod icons;
+mod smooth_scroll;
 use crate::{
     api::{AudioStream, BiliClient, SearchResult, Track},
     audio::{AudioEvent, AudioPlayer},
@@ -52,7 +55,8 @@ pub struct Ui {
     selection: gtk::SingleSelection,
     heading: gtk::Label,
     subtitle: gtk::Label,
-    hero: gtk::Box,
+    discovery: discover::Discovery,
+    list_panel: gtk::Box,
     status: gtk::Label,
     empty: gtk::Label,
     search: gtk::SearchEntry,
@@ -163,7 +167,7 @@ impl Ui {
         brand_row.set_margin_start(22);
         brand_row.set_margin_top(24);
         brand_row.set_margin_bottom(5);
-        brand_row.append(&icons::widget(Icon::Music, 30, true));
+        brand_row.append(&icons::artwork(30));
         brand_row.append(&label("Buisc", "brand"));
         let brand_handle = gtk::WindowHandle::new();
         brand_handle.set_child(Some(&brand_row));
@@ -233,7 +237,6 @@ impl Ui {
         let main_overlay = gtk::Overlay::new();
         main_overlay.set_hexpand(true);
         main_overlay.set_child(Some(&main));
-        body.append(&main_overlay);
         let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
         content.set_vexpand(true);
         margins(&content, 30);
@@ -261,33 +264,17 @@ impl Ui {
         let top_handle = gtk::WindowHandle::new();
         top_handle.set_child(Some(&top));
         content.append(&top_handle);
-        let eyebrow = label("BUISC", "eyebrow");
-        eyebrow.set_margin_top(18);
-        content.append(&eyebrow);
         let heading = label("音乐热榜", "heading");
+        heading.set_margin_top(12);
         content.append(&heading);
         let subtitle = label("从 B 站音乐区，找到今天想听的声音。", "muted");
         content.append(&subtitle);
-        let hero = gtk::Box::new(gtk::Orientation::Horizontal, 18);
-        hero.add_css_class("hero");
-        hero.set_margin_top(6);
-        hero.set_margin_bottom(8);
-        let hero_copy = gtk::Box::new(gtk::Orientation::Vertical, 10);
-        margins(&hero_copy, 25);
-        hero_copy.set_hexpand(true);
-        hero_copy.append(&label("哔哩哔哩音乐区热榜", "page-kicker"));
-        hero_copy.append(&label("音乐区热榜，\n发现正在流行。", "hero-title"));
-        hero_copy.append(&label(
-            "来自哔哩哔哩音乐区，按官方榜单顺序展示。",
-            "hero-subtitle",
-        ));
-        hero.append(&hero_copy);
-        let hero_art = icons::artwork(130);
-        hero_art.set_margin_end(30);
-        hero_art.set_margin_top(22);
-        hero_art.set_margin_bottom(22);
-        hero.append(&hero_art);
-        content.append(&hero);
+        let discovery = discover::Discovery::new();
+        content.append(&discovery.scroll);
+        let list_panel = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        list_panel.set_vexpand(true);
+        list_panel.set_margin_bottom(78);
+        content.append(&list_panel);
         let tools = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         tools.add_css_class("toolbar");
         let play_all = button("播放全部", "primary");
@@ -304,7 +291,7 @@ impl Ui {
         tools.append(&bili_favorite);
         let remove = button("移除", "");
         tools.append(&remove);
-        content.append(&tools);
+        list_panel.append(&tools);
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let selection = gtk::SingleSelection::new(Some(store.clone()));
         selection.set_autoselect(false);
@@ -368,65 +355,61 @@ impl Ui {
             .vexpand(true)
             .child(&table)
             .build();
-        content.append(&scroll);
+        smooth_scroll::attach(&scroll);
+        list_panel.append(&scroll);
         let empty = label("正在连接 B 站音乐榜…", "muted");
         empty.set_halign(gtk::Align::Center);
-        content.append(&empty);
+        list_panel.append(&empty);
         let foot = gtk::Box::new(gtk::Orientation::Horizontal, 10);
         let status = label("准备就绪", "status");
         status.set_hexpand(true);
-        status.set_wrap(true);
+        status.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        status.connect_label_notify(|status| status.set_tooltip_text(Some(&status.text())));
         foot.append(&status);
         content.append(&foot);
-        let player = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        let player = gtk::Box::new(gtk::Orientation::Horizontal, 14);
+        player.set_halign(gtk::Align::Center);
+        player.set_valign(gtk::Align::End);
+        player.set_margin_bottom(26);
+        player.set_margin_start(12);
+        player.set_margin_end(12);
         player.set_widget_name("player-bar");
         player.add_css_class("player");
-        margins(&player, 0);
+        let identity = gtk::Box::new(gtk::Orientation::Horizontal, 9);
+        identity.set_valign(gtk::Align::Center);
         let art = gtk::Stack::new();
         art.add_css_class("video-cover");
         art.set_overflow(gtk::Overflow::Hidden);
-        art.set_size_request(54, 54);
+        art.set_size_request(42, 42);
         art.set_valign(gtk::Align::Center);
-        art.add_named(&icons::artwork(54), Some("fallback"));
+        art.add_named(&icons::artwork(42), Some("fallback"));
         let cover_picture = gtk::Picture::new();
         cover_picture.set_can_shrink(true);
         cover_picture.set_content_fit(gtk::ContentFit::Cover);
         art.add_named(&cover_picture, Some("cover"));
         art.set_visible_child_name("fallback");
-        art.set_margin_start(20);
-        art.set_margin_top(12);
-        art.set_margin_bottom(12);
-        player.append(&art);
-        let now = gtk::Box::new(gtk::Orientation::Vertical, 5);
-        now.set_width_request(120);
-        now.set_hexpand(true);
+        identity.append(&art);
+        let now = gtk::Box::new(gtk::Orientation::Vertical, 3);
         now.set_valign(gtk::Align::Center);
         let now_title = label("还没有开始播放", "song-title");
         now_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        now_title.set_max_width_chars(18);
+        now_title.set_width_chars(10);
+        now_title.set_max_width_chars(13);
         let now_artist = label("双击曲目，听见喜欢", "muted");
         now_artist.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        now_artist.set_max_width_chars(13);
         now.append(&now_title);
         now.append(&now_artist);
-        player.append(&now);
-        let favorite_button = button("", "transport");
-        favorite_button.set_child(Some(&icons::widget(Icon::Heart, 19, false)));
-        favorite_button.set_valign(gtk::Align::Center);
-        favorite_button.set_tooltip_text(Some("收藏当前歌曲到本机；同步到账号请用「B站收藏」"));
-        player.append(&favorite_button);
-        let download_button = button("", "transport");
-        download_button.set_icon_name("folder-download-symbolic");
-        download_button.set_valign(gtk::Align::Center);
-        download_button.set_tooltip_text(Some("下载当前歌曲；未播放时下载选中曲目"));
-        player.append(&download_button);
-        let center = gtk::Box::new(gtk::Orientation::Vertical, 5);
-        center.set_hexpand(true);
-        center.set_width_request(170);
-        center.set_valign(gtk::Align::Center);
-        let transport = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        transport.set_halign(gtk::Align::Center);
+        identity.append(&now);
+        player.append(&identity);
+
+        let center = gtk::Box::new(gtk::Orientation::Vertical, 3);
+        let upper = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        let transport = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+        transport.add_css_class("transport-group");
+        transport.set_valign(gtk::Align::Center);
         let previous = gtk::Button::new();
-        previous.set_child(Some(&icons::widget(Icon::Previous, 22, false)));
+        previous.set_child(Some(&icons::widget(Icon::Previous, 18, false)));
         previous.add_css_class("transport");
         previous.set_tooltip_text(Some("上一首"));
         let play_button = gtk::Button::new();
@@ -434,37 +417,54 @@ impl Ui {
         play_button.add_css_class("play");
         play_button.set_tooltip_text(Some("播放 / 暂停"));
         let next = gtk::Button::new();
-        next.set_child(Some(&icons::widget(Icon::Next, 22, false)));
+        next.set_child(Some(&icons::widget(Icon::Next, 18, false)));
         next.add_css_class("transport");
         next.set_tooltip_text(Some("下一首"));
         transport.append(&previous);
         transport.append(&play_button);
         transport.append(&next);
-        center.append(&transport);
-        let seek = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0., 1., 1.);
-        seek.set_draw_value(false);
-        seek.set_sensitive(false);
-        center.append(&seek);
-        player.append(&center);
-        let extra = gtk::Box::new(gtk::Orientation::Vertical, 7);
-        extra.set_valign(gtk::Align::Center);
-        extra.set_margin_end(20);
-        let clock = label("0:00 / 0:00", "muted");
-        clock.set_halign(gtk::Align::Center);
-        extra.append(&clock);
-        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        upper.append(&transport);
+
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        actions.add_css_class("player-actions");
+        actions.set_valign(gtk::Align::Center);
+        let favorite_button = button("", "transport");
+        favorite_button.set_child(Some(&icons::widget(Icon::Heart, 18, false)));
+        favorite_button.set_tooltip_text(Some("收藏当前歌曲到本机；同步到账号请用「B站收藏」"));
+        let download_button = button("", "transport");
+        download_button.set_icon_name("folder-download-symbolic");
+        download_button.set_tooltip_text(Some("下载当前歌曲；未播放时下载选中曲目"));
         let mode = button(lib.mode.label(), "small");
+        mode.add_css_class("player-mode");
+        mode.set_valign(gtk::Align::Center);
         mode.set_tooltip_text(Some("切换顺序 / 单曲循环 / 列表循环 / 随机播放"));
-        controls.append(&mode);
         let volume = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0., 100., 1.);
-        volume.set_width_request(80);
+        volume.set_width_request(64);
         volume.set_value(lib.volume * 100.);
         volume.set_draw_value(false);
         volume.set_tooltip_text(Some("音量"));
-        controls.append(&volume);
-        extra.append(&controls);
-        player.append(&extra);
-        main.append(&player);
+        actions.append(&favorite_button);
+        actions.append(&download_button);
+        actions.append(&mode);
+        actions.append(&volume);
+        upper.append(&actions);
+        center.append(&upper);
+
+        let progress = gtk::Box::new(gtk::Orientation::Horizontal, 9);
+        let seek = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0., 1., 1.);
+        seek.set_draw_value(false);
+        seek.set_sensitive(false);
+        seek.set_hexpand(true);
+        seek.set_tooltip_text(Some("播放进度"));
+        let clock = label("0:00 / 0:00", "muted");
+        clock.add_css_class("player-clock");
+        clock.set_xalign(1.);
+        clock.set_width_chars(13);
+        progress.append(&seek);
+        progress.append(&clock);
+        center.append(&progress);
+        player.append(&center);
+        body.append(&glass::GlassPane::new(&main_overlay, &player));
         window.set_child(Some(&root));
         let (tx, rx) = async_channel::bounded(16);
         let account = crate::account::AccountClient::new(path.with_file_name("account.json"))?;
@@ -488,7 +488,8 @@ impl Ui {
             selection,
             heading,
             subtitle,
-            hero,
+            discovery,
+            list_panel,
             status,
             empty,
             search,
@@ -630,6 +631,18 @@ impl Ui {
                     if *ui.route.borrow() != route {
                         ui.navigate(route);
                     }
+                }
+            });
+        }
+        {
+            let weak = Rc::downgrade(&ui);
+            nav.connect_row_activated(move |_, row| {
+                if row.index() == 0
+                    && let Some(ui) = weak.upgrade()
+                    && *ui.route.borrow() == Route::Discover
+                    && !ui.loading.get()
+                {
+                    ui.navigate(Route::Discover);
                 }
             });
         }
@@ -879,10 +892,11 @@ impl Ui {
         self.loading.set(false);
         self.search_button.set_sensitive(true);
         self.has_more.set(false);
-        self.hero.set_visible(route == Route::Discover);
+        self.show_discovery(route == Route::Discover);
         match route {
             Route::Discover => {
                 self.heading.set_text("音乐热榜");
+                self.discovery.loading();
                 self.fetch_list(false, true);
             }
             Route::Search => {
@@ -980,7 +994,7 @@ impl Ui {
         self.sync_nav();
         self.heading
             .set_text(&format!("搜索 · {}", self.query.borrow()));
-        self.hero.set_visible(false);
+        self.show_discovery(false);
         self.fetch_list(append, false);
     }
     fn fetch_list(self: &Rc<Self>, append: bool, recommend: bool) {
@@ -1035,7 +1049,7 @@ impl Ui {
                 }
                 if let Ok(bytes) = result {
                     let loader = gtk::gdk_pixbuf::PixbufLoader::new();
-                    loader.set_size(54, 54);
+                    loader.set_size(42, 42);
                     if loader.write(&bytes).is_ok()
                         && loader.close().is_ok()
                         && let Some(pixbuf) = loader.pixbuf()
@@ -1065,6 +1079,9 @@ impl Ui {
                             }
                         }
                         self.set_tracks(tracks);
+                        if *self.route.borrow() == Route::Discover {
+                            self.discovery.render(self, &self.shown.borrow());
+                        }
                         self.has_more.set(results.has_more);
                         self.status
                             .set_text("已更新 · 音源来自 Bilibili，播放前按需解析音频。");
@@ -1074,6 +1091,9 @@ impl Ui {
                             self.page.set(self.page.get().saturating_sub(1));
                         } else {
                             self.set_tracks(vec![]);
+                            if *self.route.borrow() == Route::Discover {
+                                self.discovery.render(self, &[]);
+                            }
                         }
                         self.status.set_text(&e);
                         self.empty
@@ -1588,6 +1608,43 @@ impl Ui {
         text.set_wrap(true);
         text.set_selectable(true);
         area.append(&text);
+        let renderer = self
+            .window
+            .renderer()
+            .map(|renderer| {
+                let kind = renderer.type_();
+                let name = kind.name().to_ascii_lowercase();
+                if name.contains("cairo") {
+                    "Cairo（CPU）"
+                } else if name.contains("vulkan") {
+                    "Vulkan"
+                } else if name.contains("glrenderer") {
+                    "OpenGL"
+                } else {
+                    kind.name()
+                }
+            })
+            .unwrap_or("尚未初始化");
+        let graphics_row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        let graphics_label = label("界面渲染", "");
+        graphics_label.set_hexpand(true);
+        graphics_row.append(&graphics_label);
+        let graphics = gtk::DropDown::from_strings(&["自动（优先 GPU）", "兼容模式（CPU）"]);
+        graphics.set_selected(u32::from(crate::graphics::cpu_only()));
+        graphics_row.append(&graphics);
+        area.append(&graphics_row);
+        let graphics_status = label(
+            &format!("当前：{renderer} · 更改后需完全退出并重开"),
+            "muted",
+        );
+        graphics_status.set_wrap(true);
+        area.append(&graphics_status);
+        graphics.connect_selected_notify(move |choice| {
+            match crate::graphics::save(choice.selected() == 1) {
+                Ok(()) => graphics_status.set_text("已保存，完全退出并重新打开后生效。"),
+                Err(error) => graphics_status.set_text(&format!("无法保存渲染设置：{error}")),
+            }
+        });
         let close_to_tray = gtk::CheckButton::with_label("关闭窗口后在托盘后台运行");
         close_to_tray.set_active(self.lib.borrow().close_to_tray);
         close_to_tray.set_tooltip_text(Some(
@@ -2287,12 +2344,16 @@ mod integration_tests {
         let ui = Ui::new(&app).unwrap();
         ui.clone().start();
         wait_until(30, || !ui.loading.get());
-        pump(1);
+        pump(4);
         snapshot(
             &ui,
             &std::env::var("BILI_MUSIC_SCREENSHOT").expect("screenshot output path"),
         );
         assert_eq!(ui.heading.text(), "音乐热榜");
+        println!(
+            "GTK renderer: {}",
+            ui.window.renderer().unwrap().type_().name()
+        );
         assert!(ui.window.width() >= 860);
         assert!(!ui.window.titlebar().unwrap().is_visible());
         let main = find_widget(ui.window.upcast_ref(), &|widget| {
@@ -2303,14 +2364,30 @@ mod integration_tests {
             widget.widget_name() == "player-bar"
         })
         .unwrap();
-        assert_eq!(player.parent().as_ref(), Some(&main));
-        assert_eq!(main.last_child().as_ref(), Some(&player));
+        let pane = player.parent().and_downcast::<glass::GlassPane>().unwrap();
+        assert_eq!(player.valign(), gtk::Align::End);
+        assert_eq!(player.halign(), gtk::Align::Center);
+        assert_eq!(pane.first_child(), main.parent());
         assert!(player.width() <= main.width());
         let controls = find_widget(ui.window.upcast_ref(), &|widget| {
             widget.is::<gtk::WindowControls>()
         })
         .unwrap();
         assert!(controls.is_mapped());
+        assert!(ui.discovery.scroll.is_visible());
+        assert!(!ui.list_panel.is_visible());
+        if !ui.shown.borrow().is_empty() {
+            let full_chart = find_widget(ui.window.upcast_ref(), &|widget| {
+                widget
+                    .downcast_ref::<gtk::Button>()
+                    .is_some_and(|button| button.label().as_deref() == Some("完整榜单 ›"))
+            })
+            .and_downcast::<gtk::Button>()
+            .unwrap();
+            full_chart.emit_clicked();
+            assert!(ui.list_panel.is_visible());
+            assert!(!ui.discovery.scroll.is_visible());
+        }
         ui.window.close();
         pump(1);
     }

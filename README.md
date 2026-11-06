@@ -2,7 +2,7 @@
 
 一个用 **Rust + GTK4 + GStreamer** 编写的原生 Bilibili 音频播放器。参考 [HanversionOvO/BiliMusic](https://github.com/HanversionOvO/BiliMusic) 和 [Jmiao11/bili-music](https://github.com/Jmiao11/bili-music) 的使用场景，独立实现 Linux 版本。
 
-采用简洁的浅色侧栏、Bilibili 粉蓝配色、圆角卡片与统一矢量图标。应用不内置浏览器，不运行 Python，不加载视频，不持续播放动画。GTK 曲目列表按需创建可见行；音频使用系统 GStreamer 解码，网络缓冲设为 2 MiB，暂停时关闭进度计时器。默认使用 Cairo 界面渲染，避免常驻 GPU 渲染上下文，可通过 `BILI_MUSIC_RENDERER=gl` 覆盖。
+采用浅灰侧栏、白色内容区、封面卡片与底部居中的播放条，保留 Bilibili 粉蓝点缀。首页展示热榜封面与精选曲目，点击「完整榜单」可切回列表。应用不内置浏览器，不运行 Python，不加载视频，不持续播放动画。GTK 曲目列表按需创建可见行；音频使用系统 GStreamer 解码，网络缓冲设为 2 MiB，暂停时关闭进度计时器。默认由 GTK 选择界面渲染器，支持 GPU 加速滚动和实时磨砂；可在「设置与备份 → 界面渲染」切换 CPU 兼容模式，完全退出并重新打开后生效。若无法打开界面，可用 `BILI_MUSIC_RENDERER=cairo` 启动。
 
 ![运行界面](docs/screenshot.png)
 
@@ -29,9 +29,9 @@
 
 ```sh
 # Debian / Ubuntu
-sudo apt install ./buisc_0.1.1_amd64.deb
+sudo apt install ./buisc_0.2.0_amd64.deb
 # Fedora（下载文件名中的 x86_64 对应 amd64）
-sudo dnf install ./buisc-0.1.1-1.x86_64.rpm
+sudo dnf install ./buisc-0.2.0-1.x86_64.rpm
 ```
 
 ## 编译与运行
@@ -99,7 +99,7 @@ cargo clippy --all-targets --locked -j 2 -- -D warnings
 
 支持游客与扫码登录，只选择普通 AAC 音频，不处理无损音轨。多 P 视频当前播放第一 P。音频 URL 在播放前重新解析，不持久化临时签名。网络不可用或平台风控时会显示错误，不自动无限重试。
 
-播放栏按需加载当前视频的小尺寸封面，仅保留当前封面在内存中，加载失败时显示默认图标。暂未加入歌词或多 P 连播。源码和 release 二进制依赖系统 GTK / GStreamer 动态库，当前没有制作跨发行版 AppImage。开发与安装脚本使用 Python 3，应用运行本身不需要 Python。
+播放栏只加载当前视频的封面；首页分批加载有限数量的热榜缩略图。封面不写入磁盘，加载失败时显示默认图标。暂未加入歌词或多 P 连播。源码和 release 二进制依赖系统 GTK / GStreamer 动态库，当前没有制作跨发行版 AppImage。开发与安装脚本使用 Python 3，应用运行本身不需要 Python。
 
 本项目与 Bilibili 无官方关联。音视频内容来自平台，不随项目分发。
 
