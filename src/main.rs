@@ -3,6 +3,7 @@ mod api;
 mod audio;
 mod download;
 mod graphics;
+mod lyrics;
 mod mpris;
 mod storage;
 mod tray;

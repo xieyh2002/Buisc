@@ -1,4 +1,6 @@
 use std::cell::Cell;
+use std::fs::File;
+use std::path::Path;
 use std::rc::Rc;
 
 use gst::glib::{ControlFlow, FlagsClass};
@@ -146,10 +148,14 @@ impl AudioPlayer {
         Ok(())
     }
 
+    pub fn load_local(&self, path: &Path) -> Result<(), String> {
+        let uri = local_file_uri(path)?;
+        self.start_uri(&uri)
+    }
+
     #[cfg(test)]
-    pub(crate) fn load_test_file(&self, path: &std::path::Path) -> Result<(), String> {
-        let uri = gtk::gio::prelude::FileExt::uri(&gtk::gio::File::for_path(path));
-        self.start_uri(uri.as_str())
+    pub(crate) fn load_test_file(&self, path: &Path) -> Result<(), String> {
+        self.load_local(path)
     }
 
     pub fn toggle(&self) {
@@ -192,9 +198,13 @@ impl AudioPlayer {
     }
 
     pub fn position(&self) -> u64 {
+        self.position_ms().unwrap_or_default() / 1_000
+    }
+
+    pub fn position_ms(&self) -> Option<u64> {
         self.playbin
             .query_position::<gst::ClockTime>()
-            .map_or(0, gst::ClockTime::seconds)
+            .map(gst::ClockTime::mseconds)
     }
 
     pub fn duration(&self) -> u64 {
@@ -214,6 +224,24 @@ impl Drop for AudioPlayer {
         let _ = self.playbin.set_state(gst::State::Null);
         self._bus_watch.take();
     }
+}
+
+fn local_file_uri(path: &Path) -> Result<String, String> {
+    if path.as_os_str().is_empty() {
+        return Err("本地音频路径不能为空".to_string());
+    }
+
+    let canonical_path =
+        std::fs::canonicalize(path).map_err(|error| format!("本地音频路径无效：{error}"))?;
+    let metadata = canonical_path
+        .metadata()
+        .map_err(|error| format!("无法读取本地音频文件信息：{error}"))?;
+    if !metadata.is_file() {
+        return Err("本地音频路径不是普通文件".to_string());
+    }
+
+    File::open(&canonical_path).map_err(|error| format!("本地音频文件不可读：{error}"))?;
+    Ok(gtk::gio::prelude::FileExt::uri(&gtk::gio::File::for_path(canonical_path)).to_string())
 }
 
 fn configure_audio_only(playbin: &gst::Element) -> Result<(), String> {
@@ -408,6 +436,28 @@ mod tests {
         assert!(mpd.contains("indexRange=\"818-1365\""));
         assert!(mpd.contains("bandwidth=\"184067\""));
         assert!(data_uri(&mpd).starts_with("data:application/dash+xml"));
+    }
+
+    #[test]
+    fn local_file_uri_is_normalized_and_requires_a_regular_file() {
+        let directory =
+            std::env::temp_dir().join(format!("bili-audio-local-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let audio_path = directory.join("downloaded.audio");
+        std::fs::write(&audio_path, b"local audio").unwrap();
+
+        let input = directory.join(".").join("downloaded.audio");
+        let uri = local_file_uri(&input).unwrap();
+        let canonical_path = std::fs::canonicalize(audio_path).unwrap();
+        let expected = gtk::gio::prelude::FileExt::uri(&gtk::gio::File::for_path(canonical_path));
+        assert_eq!(uri, expected.as_str());
+
+        assert!(local_file_uri(&directory).is_err());
+        assert!(local_file_uri(&directory.join("missing.audio")).is_err());
+        assert!(local_file_uri(Path::new("")).is_err());
+
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

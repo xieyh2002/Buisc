@@ -4,9 +4,11 @@ mod download_ui;
 mod glass;
 mod icons;
 mod smooth_scroll;
+mod subtitle_lyrics;
 use crate::{
     api::{AudioStream, BiliClient, SearchResult, Track},
     audio::{AudioEvent, AudioPlayer},
+    lyrics::Lyrics,
     storage::{self, Library},
 };
 use gtk::{gio, glib, prelude::*};
@@ -25,6 +27,7 @@ enum Route {
     Favorites,
     History,
     Queue,
+    Downloads,
     Playlist(String),
     RemoteFavorites,
     RemoteFolder(u64, String),
@@ -34,7 +37,8 @@ enum Event {
     List(u64, Result<SearchResult, String>, bool),
     Stream(u64, Box<Track>, Result<AudioStream, String>),
     Cover(u64, Result<Vec<u8>, String>),
-    Download(PathBuf, Result<(), String>),
+    Lyrics(u64, Lyrics),
+    Download(Box<Track>, PathBuf, Result<(), String>),
 }
 
 pub struct Ui {
@@ -48,6 +52,8 @@ pub struct Ui {
     audio: RefCell<Option<AudioPlayer>>,
     lib: RefCell<Library>,
     path: PathBuf,
+    downloads: RefCell<storage::DownloadIndex>,
+    playing_local: Cell<bool>,
     route: RefCell<Route>,
     current: RefCell<Option<Track>>,
     shown: RefCell<Vec<Track>>,
@@ -65,6 +71,12 @@ pub struct Ui {
     play_button: gtk::Button,
     now_title: gtk::Label,
     now_artist: gtk::Label,
+    lyric_line: gtk::Label,
+    lyrics: RefCell<Lyrics>,
+    lyrics_generation: Cell<Option<u64>>,
+    lyrics_inflight: Cell<bool>,
+    pending_lyrics: RefCell<Option<(u64, String, Option<u64>)>>,
+    lyrics_timer: RefCell<Option<glib::SourceId>>,
     cover_stack: gtk::Stack,
     cover_picture: gtk::Picture,
     favorite_button: gtk::Button,
@@ -150,11 +162,13 @@ impl Ui {
                 path.with_file_name("library.recovered.json"),
             ),
         };
-        // Keep client-side resize borders without a separate titlebar row.
-        let titlebar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        titlebar.set_visible(false);
-        window.set_titlebar(Some(&titlebar));
+        let (downloads, warning) =
+            match storage::load_downloads(&path.with_file_name("downloads.json")) {
+                Ok(downloads) => (downloads, warning),
+                Err(error) => (storage::DownloadIndex::default(), warning.or(Some(error))),
+            };
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.add_css_class("app-content");
         let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         body.set_vexpand(true);
         root.append(&body);
@@ -169,9 +183,7 @@ impl Ui {
         brand_row.set_margin_bottom(5);
         brand_row.append(&icons::artwork(30));
         brand_row.append(&label("Buisc", "brand"));
-        let brand_handle = gtk::WindowHandle::new();
-        brand_handle.set_child(Some(&brand_row));
-        sidebar.append(&brand_handle);
+        sidebar.append(&brand_row);
         let tagline = label("Bilibili 音乐播放器", "tagline");
         tagline.set_margin_start(28);
         tagline.set_margin_bottom(24);
@@ -188,6 +200,7 @@ impl Ui {
             ("本地收藏", Icon::Heart),
             ("最近播放", Icon::History),
             ("播放队列", Icon::Queue),
+            ("已下载", Icon::Download),
             ("B站收藏夹", Icon::Cloud),
             ("B站历史", Icon::History),
         ] {
@@ -240,7 +253,6 @@ impl Ui {
         let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
         content.set_vexpand(true);
         margins(&content, 30);
-        content.set_margin_top(44);
         content.set_margin_bottom(8);
         main.append(&content);
         let top = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -253,17 +265,7 @@ impl Ui {
         top.append(&search);
         let search_button = button("搜索", "primary");
         top.append(&search_button);
-        let window_controls = gtk::WindowControls::new(gtk::PackType::End);
-        window_controls.set_decoration_layout(Some(":minimize,maximize,close"));
-        window_controls.add_css_class("corner-window-controls");
-        window_controls.set_halign(gtk::Align::End);
-        window_controls.set_valign(gtk::Align::Start);
-        window_controls.set_margin_top(6);
-        window_controls.set_margin_end(8);
-        main_overlay.add_overlay(&window_controls);
-        let top_handle = gtk::WindowHandle::new();
-        top_handle.set_child(Some(&top));
-        content.append(&top_handle);
+        content.append(&top);
         let heading = label("音乐热榜", "heading");
         heading.set_margin_top(12);
         content.append(&heading);
@@ -289,6 +291,8 @@ impl Ui {
         tools.append(&add_playlist);
         let bili_favorite = button("B站收藏", "");
         tools.append(&bili_favorite);
+        let link_audio = button("关联本地音频", "");
+        tools.append(&link_audio);
         let remove = button("移除", "");
         tools.append(&remove);
         list_panel.append(&tools);
@@ -463,6 +467,12 @@ impl Ui {
         progress.append(&seek);
         progress.append(&clock);
         center.append(&progress);
+        let lyric_line = gtk::Label::new(None);
+        lyric_line.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        lyric_line.set_single_line_mode(true);
+        lyric_line.set_max_width_chars(36);
+        lyric_line.set_visible(false);
+        center.append(&lyric_line);
         player.append(&center);
         body.append(&glass::GlassPane::new(&main_overlay, &player));
         window.set_child(Some(&root));
@@ -481,6 +491,8 @@ impl Ui {
             audio: RefCell::new(None),
             lib: RefCell::new(lib),
             path,
+            downloads: RefCell::new(downloads),
+            playing_local: Cell::new(false),
             route: RefCell::new(Route::Discover),
             current: RefCell::new(None),
             shown: RefCell::new(vec![]),
@@ -498,6 +510,12 @@ impl Ui {
             play_button,
             now_title,
             now_artist,
+            lyric_line,
+            lyrics: RefCell::new(Lyrics::default()),
+            lyrics_generation: Cell::new(None),
+            lyrics_inflight: Cell::new(false),
+            pending_lyrics: RefCell::new(None),
+            lyrics_timer: RefCell::new(None),
             cover_stack: art,
             cover_picture,
             favorite_button,
@@ -595,6 +613,7 @@ impl Ui {
         });
         clicked!(add_playlist, |ui: Rc<Self>| ui.choose_playlist());
         clicked!(bili_favorite, |ui: Rc<Self>| ui.favorite_remote());
+        clicked!(link_audio, |ui: Rc<Self>| ui.link_local_audio());
         clicked!(ui.account_button, |ui: Rc<Self>| ui.account_dialog());
         clicked!(remove, |ui: Rc<Self>| ui.remove_selected());
         clicked!(new_playlist, |ui: Rc<Self>| ui.new_playlist());
@@ -625,7 +644,8 @@ impl Ui {
                         2 => Route::Favorites,
                         3 => Route::History,
                         4 => Route::Queue,
-                        5 => Route::RemoteFavorites,
+                        5 => Route::Downloads,
+                        6 => Route::RemoteFavorites,
                         _ => Route::RemoteHistory,
                     };
                     if *ui.route.borrow() != route {
@@ -676,10 +696,8 @@ impl Ui {
             ui.seek.connect_change_value(move |_, _, value| {
                 if let Some(ui) = weak.upgrade()
                     && !ui.updating_seek.get()
-                    && let Some(a) = ui.audio.borrow().as_ref()
-                    && let Err(error) = a.seek(value.max(0.) as u64)
                 {
-                    ui.status.set_text(&error);
+                    ui.seek_to(value.max(0.) as u64);
                 }
                 glib::Propagation::Proceed
             });
@@ -878,8 +896,9 @@ impl Ui {
             Route::Favorites => Some(2),
             Route::History => Some(3),
             Route::Queue => Some(4),
-            Route::RemoteFavorites => Some(5),
-            Route::RemoteHistory => Some(6),
+            Route::Downloads => Some(5),
+            Route::RemoteFavorites => Some(6),
+            Route::RemoteHistory => Some(7),
             Route::Playlist(_) | Route::RemoteFolder(_, _) => None,
         };
         self.nav
@@ -922,6 +941,13 @@ impl Ui {
                 self.set_tracks(self.lib.borrow().queue.clone());
                 self.status
                     .set_text("按队列顺序播放，顺序模式到末尾会停止。");
+            }
+            Route::Downloads => {
+                self.heading.set_text("已下载");
+                self.set_tracks(self.downloads.borrow().tracks());
+                self.empty
+                    .set_text("下载歌曲或关联已有音频后，即可在此离线播放。");
+                self.status.set_text("双击播放已下载的音频文件。");
             }
             Route::RemoteFavorites => {
                 self.heading.set_text("B站收藏夹");
@@ -1035,11 +1061,12 @@ impl Ui {
                 .set(self.active_requests.get().saturating_sub(1));
         }
         match event {
-            Event::Download(path, result) => {
+            Event::Lyrics(generation, lyrics) => self.receive_lyrics(generation, lyrics),
+            Event::Download(track, path, result) => {
                 self.downloading.set(false);
                 self.download_button.set_sensitive(true);
                 self.status.set_text(&match result {
-                    Ok(()) => format!("音频已保存：{}", path.display()),
+                    Ok(()) => self.record_download(&track, path),
                     Err(error) => format!("下载失败：{error}"),
                 });
             }
@@ -1116,14 +1143,6 @@ impl Ui {
                 }
                 match result {
                     Ok(stream) => {
-                        *self.current.borrow_mut() = Some(track.clone());
-                        self.now_title.set_text(&track.title);
-                        self.now_title.set_tooltip_text(Some(&track.title));
-                        self.now_artist.set_text(&track.artist);
-                        self.load_cover(generation, &track.cover);
-                        self.seek.set_range(0., stream.duration.max(1) as f64);
-                        self.seek.set_sensitive(true);
-                        self.seek.set_value(0.);
                         let result = self
                             .audio
                             .borrow()
@@ -1146,14 +1165,12 @@ impl Ui {
                                 }
                             });
                         match result {
-                            Ok(()) => {
-                                self.stopped.set(false);
-                                self.lib.borrow_mut().remember(track);
-                                self.schedule_save();
-                                self.status.set_text("正在缓冲音频…");
-                                self.update_favorite();
-                                self.notify_mpris();
-                            }
+                            Ok(()) => self.playback_started(
+                                generation,
+                                track,
+                                stream.duration,
+                                Some(stream.cid),
+                            ),
                             Err(e) => self.status.set_text(&e),
                         }
                     }
@@ -1200,12 +1217,63 @@ impl Ui {
         self.sync_history(true);
         self.stopped.set(true);
         self.remove_timer();
+        self.clear_lyrics();
         if let Some(a) = self.audio.borrow().as_ref() {
             a.stop();
         }
         self.enqueue(track.clone());
         let generation = self.play_generation.get() + 1;
         self.play_generation.set(generation);
+        self.pending_stream.borrow_mut().take();
+        self.playing_local.set(false);
+        let playing_local = self
+            .downloads
+            .borrow()
+            .path_for(&track.bvid)
+            .is_some_and(|path| {
+                self.audio
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|audio| audio.load_local(path).is_ok())
+            });
+        if playing_local {
+            let duration = track.duration;
+            self.playing_local.set(true);
+            self.playback_started(generation, track, duration, None);
+        } else {
+            self.request_stream(generation, track);
+        }
+    }
+
+    fn playback_started(
+        self: &Rc<Self>,
+        generation: u64,
+        track: Track,
+        duration: u64,
+        cid: Option<u64>,
+    ) {
+        self.stopped.set(false);
+        self.now_title.set_text(&track.title);
+        self.now_title.set_tooltip_text(Some(&track.title));
+        self.now_artist.set_text(&track.artist);
+        self.load_cover(generation, &track.cover);
+        self.load_lyrics(generation, &track.bvid, cid);
+        self.seek.set_range(0., duration.max(1) as f64);
+        self.seek.set_sensitive(true);
+        self.seek.set_value(0.);
+        *self.current.borrow_mut() = Some(track.clone());
+        self.lib.borrow_mut().remember(track);
+        self.schedule_save();
+        self.status.set_text(if self.playing_local.get() {
+            "正在打开已下载音频…"
+        } else {
+            "正在缓冲音频…"
+        });
+        self.update_favorite();
+        self.notify_mpris();
+    }
+
+    fn request_stream(&self, generation: u64, track: Track) {
         self.status.set_text(&format!("正在解析：{}", track.title));
         if self.stream_inflight.get() {
             *self.pending_stream.borrow_mut() = Some((generation, track));
@@ -1280,6 +1348,7 @@ impl Ui {
         self.sync_history(true);
         self.stopped.set(true);
         self.remove_timer();
+        self.clear_lyrics();
         self.play_generation.set(self.play_generation.get() + 1);
         if let Some(a) = self.audio.borrow().as_ref() {
             a.stop();
@@ -1350,6 +1419,10 @@ impl Ui {
             return;
         };
         let route = self.route.borrow().clone();
+        if route == Route::Downloads {
+            self.unlink_local_audio(&track);
+            return;
+        }
         let mut lib = self.lib.borrow_mut();
         match &route {
             Route::Favorites => lib.favorites.retain(|t| t.id != track.id),
@@ -1378,6 +1451,7 @@ impl Ui {
             AudioEvent::Error(e) => {
                 self.stopped.set(true);
                 self.remove_timer();
+                self.clear_lyrics();
                 self.status.set_text(&format!("音频播放失败：{e}"));
                 icons::set_play(&self.play_button, false);
                 self.notify_mpris();
@@ -1385,8 +1459,13 @@ impl Ui {
             AudioEvent::Playing(playing) => {
                 icons::set_play(&self.play_button, playing);
                 if playing {
-                    self.status.set_text("正在播放 · 仅音频流，无视频解码");
+                    self.status.set_text(if self.playing_local.get() {
+                        "正在播放 · 已下载音频"
+                    } else {
+                        "正在播放 · 仅音频流，无视频解码"
+                    });
                     self.ensure_timer();
+                    self.ensure_lyrics_timer();
                 } else {
                     self.remove_timer();
                 }
@@ -1431,6 +1510,7 @@ impl Ui {
         if let Some(id) = self.timer.borrow_mut().take() {
             id.remove();
         }
+        self.remove_lyrics_timer();
     }
     fn schedule_save(self: &Rc<Self>) {
         if let Some(id) = self.pending_save.borrow_mut().take() {
@@ -1481,6 +1561,8 @@ impl Ui {
         entry.set_placeholder_text(Some("歌单名称"));
         entry.set_max_length(60);
         margins(&entry, 20);
+        dialog.content_area().add_css_class("app-content");
+        dialog.content_area().add_css_class("dialog-content");
         dialog.content_area().append(&entry);
         dialog.set_default_response(gtk::ResponseType::Accept);
         entry.set_activates_default(true);
@@ -1530,6 +1612,8 @@ impl Ui {
         let strings: Vec<_> = names.iter().map(String::as_str).collect();
         let choice = gtk::DropDown::from_strings(&strings);
         margins(&choice, 20);
+        dialog.content_area().add_css_class("app-content");
+        dialog.content_area().add_css_class("dialog-content");
         dialog.content_area().append(&choice);
         let weak = Rc::downgrade(self);
         dialog.connect_response(move |d, r| {
@@ -1575,10 +1659,6 @@ impl Ui {
             .default_width(550)
             .resizable(false)
             .build();
-        let header = gtk::HeaderBar::new();
-        header.set_decoration_layout(Some(":close"));
-        header.set_title_widget(Some(&label("设置与备份", "window-title")));
-        dialog.set_titlebar(Some(&header));
         let keys = gtk::EventControllerKey::new();
         let weak = Rc::downgrade(self);
         keys.connect_key_pressed(move |_, key, _, _| {
@@ -1593,6 +1673,8 @@ impl Ui {
         });
         dialog.add_controller(keys);
         let area = gtk::Box::new(gtk::Orientation::Vertical, 15);
+        area.add_css_class("app-content");
+        area.add_css_class("dialog-content");
         dialog.set_child(Some(&area));
         area.set_spacing(15);
         margins(&area, 24);
@@ -1826,10 +1908,11 @@ impl Ui {
         }
     }
     pub fn seek_to(&self, seconds: u64) {
-        if let Some(a) = self.audio.borrow().as_ref()
-            && let Err(error) = a.seek(seconds)
-        {
-            self.status.set_text(&error);
+        if let Some(a) = self.audio.borrow().as_ref() {
+            match a.seek(seconds) {
+                Ok(()) => self.update_lyric(seconds.saturating_mul(1_000)),
+                Err(error) => self.status.set_text(&error),
+            }
         }
     }
     pub fn notify_mpris(&self) {
@@ -1846,6 +1929,71 @@ impl Ui {
 mod integration_tests {
     use super::*;
     use std::time::{Duration, Instant};
+    fn write_silent_wav(path: &std::path::Path, seconds: u32) {
+        let sample_rate = 8000u32;
+        let data_size = sample_rate * 2 * seconds;
+        let mut wav = Vec::with_capacity((44 + data_size) as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_size).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&sample_rate.to_le_bytes());
+        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_size.to_le_bytes());
+        wav.resize((44 + data_size) as usize, 0);
+        std::fs::write(path, wav).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires a desktop session and an isolated XDG_DATA_HOME"]
+    fn native_downloaded_audio() {
+        assert_eq!(std::env::var("BILI_MUSIC_TEST").as_deref(), Ok("1"));
+        assert!(
+            std::env::var("XDG_DATA_HOME")
+                .unwrap()
+                .contains("bili-test-")
+        );
+        gtk::init().unwrap();
+        gstreamer::init().unwrap();
+        let app = gtk::Application::builder()
+            .application_id("io.github.bilimusic.Test")
+            .build();
+        app.register(gio::Cancellable::NONE).unwrap();
+        let ui = Ui::new(&app).unwrap();
+        let path = ui.path.with_file_name("下载测试 静音.wav");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        write_silent_wav(&path, 10);
+        let track = Track {
+            id: "BV1BDk2YCEHF".into(),
+            bvid: "BV1BDk2YCEHF".into(),
+            title: "已下载的测试音频".into(),
+            duration: 10,
+            ..Default::default()
+        };
+
+        ui.handle(Event::Download(
+            Box::new(track.clone()),
+            path.clone(),
+            Ok(()),
+        ));
+        let saved = storage::load_downloads(&ui.path.with_file_name("downloads.json")).unwrap();
+        assert_eq!(saved.path_for(&track.bvid), Some(path.as_path()));
+        ui.navigate(Route::Downloads);
+        assert_eq!(*ui.shown.borrow(), vec![track.clone()]);
+        ui.set_volume(0.);
+        ui.play_all();
+        wait_until(5, || ui.playing() && ui.position() >= 1);
+        assert!(ui.playing_local.get());
+        assert!(!ui.stream_inflight.get());
+        assert_eq!(ui.status.text(), "正在播放 · 已下载音频");
+        ui.stop();
+    }
+
     fn wait_until(timeout: u64, test: impl Fn() -> bool) {
         let context = glib::MainContext::default();
         let start = Instant::now();
@@ -1930,15 +2078,6 @@ mod integration_tests {
         }
         None
     }
-    fn click_window_close(window: &gtk::Window) {
-        let close = find_widget(window.upcast_ref(), &|widget| {
-            widget.is::<gtk::Button>() && widget.has_css_class("close")
-        })
-        .and_downcast::<gtk::Button>()
-        .expect("window close button");
-        close.emit_clicked();
-    }
-
     fn dbus_call(
         connection: &gio::DBusConnection,
         destination: &str,
@@ -2070,23 +2209,7 @@ mod integration_tests {
         // Real, silent GStreamer playback verifies that close-to-tray does not
         // stop the audio pipeline. The fixture stays in the isolated test data.
         let wav_path = ui.path.with_file_name("tray-test-silence.wav");
-        let sample_rate = 8000u32;
-        let data_size = sample_rate * 2 * 30;
-        let mut wav = Vec::with_capacity((44 + data_size) as usize);
-        wav.extend_from_slice(b"RIFF");
-        wav.extend_from_slice(&(36 + data_size).to_le_bytes());
-        wav.extend_from_slice(b"WAVEfmt ");
-        wav.extend_from_slice(&16u32.to_le_bytes());
-        wav.extend_from_slice(&1u16.to_le_bytes());
-        wav.extend_from_slice(&1u16.to_le_bytes());
-        wav.extend_from_slice(&sample_rate.to_le_bytes());
-        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes());
-        wav.extend_from_slice(&2u16.to_le_bytes());
-        wav.extend_from_slice(&16u16.to_le_bytes());
-        wav.extend_from_slice(b"data");
-        wav.extend_from_slice(&data_size.to_le_bytes());
-        wav.resize((44 + data_size) as usize, 0);
-        std::fs::write(&wav_path, wav).unwrap();
+        write_silent_wav(&wav_path, 30);
         *ui.current.borrow_mut() = Some(Track {
             id: "BV1BDk2YCEHF".into(),
             bvid: "BV1BDk2YCEHF".into(),
@@ -2185,7 +2308,7 @@ mod integration_tests {
         ui.settings();
         let settings = ui.settings_window.borrow().clone().unwrap();
         pump(1);
-        click_window_close(&settings);
+        settings.close();
         pump(1);
         assert!(!settings.is_visible());
         assert!(ui.settings_window.borrow().is_none());
@@ -2194,7 +2317,7 @@ mod integration_tests {
         ui.settings();
         assert_eq!(ui.settings_window.borrow().as_ref(), Some(&settings));
         pump(1);
-        click_window_close(ui.window.upcast_ref());
+        ui.window.close();
         pump(1);
         assert!(!settings.is_visible());
         assert!(ui.settings_window.borrow().is_none());
@@ -2355,7 +2478,7 @@ mod integration_tests {
             ui.window.renderer().unwrap().type_().name()
         );
         assert!(ui.window.width() >= 860);
-        assert!(!ui.window.titlebar().unwrap().is_visible());
+        assert!(ui.window.titlebar().is_none());
         let main = find_widget(ui.window.upcast_ref(), &|widget| {
             widget.widget_name() == "main-pane"
         })
@@ -2369,12 +2492,30 @@ mod integration_tests {
         assert_eq!(player.halign(), gtk::Align::Center);
         assert_eq!(pane.first_child(), main.parent());
         assert!(player.width() <= main.width());
-        let controls = find_widget(ui.window.upcast_ref(), &|widget| {
-            widget.is::<gtk::WindowControls>()
-        })
-        .unwrap();
-        assert!(controls.is_mapped());
+        assert!(
+            find_widget(&ui.window.child().unwrap(), &|widget| {
+                widget.is::<gtk::WindowControls>() || widget.is::<gtk::WindowHandle>()
+            })
+            .is_none()
+        );
+        ui.window.maximize();
+        wait_until(5, || ui.window.is_maximized());
+        ui.window.unmaximize();
+        wait_until(5, || !ui.window.is_maximized());
+        ui.window.fullscreen();
+        wait_until(5, || ui.window.is_fullscreen());
+        ui.window.unfullscreen();
+        wait_until(5, || !ui.window.is_fullscreen());
         assert!(ui.discovery.scroll.is_visible());
+        assert!(!ui.discovery.scroll.is_overlay_scrolling());
+        let demo_tracks = vec![Track::default(); 21];
+        ui.discovery.render(&ui, &demo_tracks);
+        pump(1);
+        let scroll = &ui.discovery.scroll;
+        let viewport = scroll.child().unwrap().compute_bounds(scroll).unwrap();
+        let scrollbar = scroll.vscrollbar();
+        assert!(scrollbar.is_mapped());
+        assert!(viewport.x() + viewport.width() <= scrollbar.compute_bounds(scroll).unwrap().x());
         assert!(!ui.list_panel.is_visible());
         if !ui.shown.borrow().is_empty() {
             let full_chart = find_widget(ui.window.upcast_ref(), &|widget| {
@@ -2388,6 +2529,33 @@ mod integration_tests {
             assert!(ui.list_panel.is_visible());
             assert!(!ui.discovery.scroll.is_visible());
         }
+        ui.settings();
+        let settings = ui.settings_window.borrow().clone().unwrap();
+        assert!(settings.titlebar().is_none());
+        assert!(
+            find_widget(&settings.child().unwrap(), &|widget| widget
+                .is::<gtk::HeaderBar>())
+            .is_none()
+        );
+        assert!(!ui.lyric_line.is_visible());
+        let lyrics = Lyrics::from_json(
+            br#"{"body":[{"from":0,"to":1,"content":"First line"},{"from":2,"to":3,"content":"Second line"}]}"#,
+        )
+        .unwrap();
+        ui.lyrics_generation.set(Some(2));
+        ui.receive_lyrics(1, lyrics.clone());
+        assert!(!ui.lyric_line.is_visible());
+        ui.receive_lyrics(2, lyrics);
+        assert!(ui.lyric_line.is_visible());
+        assert_eq!(ui.lyric_line.text(), "First line");
+        ui.update_lyric(1_500);
+        assert!(ui.lyric_line.text().trim().is_empty());
+        ui.update_lyric(2_000);
+        assert_eq!(ui.lyric_line.text(), "Second line");
+        ui.stop();
+        assert!(!ui.lyric_line.is_visible());
+        settings.close();
+        pump(1);
         ui.window.close();
         pump(1);
     }

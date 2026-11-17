@@ -11,6 +11,7 @@ pub(super) enum Icon {
     Home,
     History,
     Queue,
+    Download,
     Cloud,
     Settings,
     Plus,
@@ -42,6 +43,11 @@ fn paint(cr: &cairo::Context, icon: Icon) {
             cr.rectangle(6.5, 5., 4., 14.);
             cr.rectangle(13.5, 5., 4., 14.);
             let _ = cr.fill();
+        }
+        Icon::Download => {
+            line(cr, &[(12., 4.), (12., 15.)]);
+            line(cr, &[(8., 11.), (12., 15.), (16., 11.)]);
+            line(cr, &[(5., 15.), (5., 20.), (19., 20.), (19., 15.)]);
         }
         Icon::Next | Icon::Previous => {
             let _ = cr.save();

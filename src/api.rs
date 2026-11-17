@@ -1,4 +1,5 @@
 use crate::account::AccountClient;
+use crate::lyrics::Lyrics;
 use md5::compute as md5_digest;
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
@@ -54,6 +55,8 @@ pub struct AudioStream {
     pub url: String,
     pub duration: u64,
     #[serde(default)]
+    pub cid: u64,
+    #[serde(default)]
     pub initialization_range: String,
     #[serde(default)]
     pub index_range: String,
@@ -66,6 +69,7 @@ pub struct AudioStream {
 #[derive(Clone)]
 pub struct BiliClient {
     client: Client,
+    subtitle_client: Client,
     api_base: String,
     wbi_cache: Arc<Mutex<Option<WbiCache>>>,
     account: Option<AccountClient>,
@@ -84,6 +88,15 @@ struct AudioCandidate {
     initialization_range: String,
     index_range: String,
     codecs: String,
+}
+
+#[derive(Clone, Debug)]
+struct SubtitleTrack {
+    url: String,
+    language: String,
+    label: String,
+    is_ai: bool,
+    order: usize,
 }
 
 #[derive(Debug)]
@@ -183,6 +196,108 @@ fn allowed_host(host: &str, suffixes: &[&str]) -> bool {
     suffixes
         .iter()
         .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+}
+
+fn normalize_subtitle_url(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().any(char::is_control) {
+        return Err("B 站字幕地址无效".to_owned());
+    }
+    let normalized = if let Some(rest) = value.strip_prefix("//") {
+        format!("https://{rest}")
+    } else {
+        value.to_owned()
+    };
+    let mut parsed = Url::parse(&normalized).map_err(|_| "B 站字幕地址无效".to_owned())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "B 站字幕地址无效".to_owned())?;
+    if parsed.scheme() != "https"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some_and(|port| port != 443)
+        || !allowed_host(host, &["hdslb.com"])
+        || parsed.path() == "/"
+    {
+        return Err("B 站字幕地址无效".to_owned());
+    }
+    parsed.set_fragment(None);
+    Ok(parsed.into())
+}
+
+fn subtitle_track_from_value(value: &Value, order: usize) -> Option<SubtitleTrack> {
+    let object = value.as_object()?;
+    let raw_url = object.get("subtitle_url").and_then(Value::as_str)?;
+    let url = normalize_subtitle_url(raw_url).ok()?;
+    let language = object
+        .get("lan")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    let label = object
+        .get("lan_doc")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    let is_ai = language.to_ascii_lowercase().starts_with("ai-")
+        || value_to_u64(object.get("ai_type")) > 0
+        || value_to_u64(object.get("ai_status")) == 1;
+    Some(SubtitleTrack {
+        url,
+        language,
+        label,
+        is_ai,
+        order,
+    })
+}
+
+fn subtitle_language_rank(track: &SubtitleTrack) -> u8 {
+    let language = track.language.trim().to_ascii_lowercase().replace('_', "-");
+    let label = track.label.to_ascii_lowercase();
+    let simplified_label = ["简体", "簡體", "simplified"]
+        .iter()
+        .any(|marker| label.contains(marker));
+    let traditional_label = ["繁体", "繁體", "traditional"]
+        .iter()
+        .any(|marker| label.contains(marker));
+    let chinese_label = ["中文", "汉语", "漢語", "chinese"]
+        .iter()
+        .any(|marker| label.contains(marker));
+
+    if track.is_ai {
+        if simplified_label || matches!(language.as_str(), "ai-zh-hans" | "ai-zh-cn") {
+            4
+        } else if chinese_label || language.starts_with("ai-zh") {
+            5
+        } else {
+            7
+        }
+    } else if language == "zh-hans" {
+        0
+    } else if simplified_label || matches!(language.as_str(), "zh-cn" | "zh-sg" | "zh-hans-cn") {
+        1
+    } else if traditional_label || matches!(language.as_str(), "zh-hant" | "zh-tw" | "zh-hk") {
+        3
+    } else if chinese_label || language == "zh" || language.starts_with("zh-") {
+        2
+    } else {
+        7
+    }
+}
+
+fn select_subtitle_track(values: &[Value]) -> Option<SubtitleTrack> {
+    values
+        .iter()
+        .enumerate()
+        .filter_map(|(order, value)| subtitle_track_from_value(value, order))
+        .min_by(|left, right| {
+            subtitle_language_rank(left)
+                .cmp(&subtitle_language_rank(right))
+                .then_with(|| left.is_ai.cmp(&right.is_ai))
+                .then_with(|| left.order.cmp(&right.order))
+        })
 }
 
 fn safe_wbi_image_url(value: Option<&Value>) -> Result<String, RequestError> {
@@ -688,9 +803,17 @@ impl BiliClient {
             .user_agent(USER_AGENT)
             .build()
             .map_err(|_| "无法初始化 B 站网络客户端".to_owned())?;
+        let subtitle_client = Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(USER_AGENT)
+            .build()
+            .map_err(|_| "无法初始化 B 站字幕网络客户端".to_owned())?;
 
         Ok(Self {
             client,
+            subtitle_client,
             api_base,
             wbi_cache: Arc::new(Mutex::new(None)),
             account: None,
@@ -844,7 +967,7 @@ impl BiliClient {
         Ok(tracks)
     }
 
-    pub fn resolve(&self, bvid: &str) -> Result<AudioStream, String> {
+    fn first_video_page(&self, bvid: &str) -> Result<(u64, u64), String> {
         if !valid_bvid(bvid) {
             return Err("BV 号格式不正确".to_owned());
         }
@@ -887,6 +1010,11 @@ impl BiliClient {
             .map(value_to_duration)
             .or_else(|| view_data.get("duration").map(value_to_duration))
             .unwrap_or_default();
+        Ok((cid, duration))
+    }
+
+    pub fn resolve(&self, bvid: &str) -> Result<AudioStream, String> {
+        let (cid, duration) = self.first_video_page(bvid)?;
         let play_url = self
             .api_url(
                 "/x/player/playurl",
@@ -938,11 +1066,69 @@ impl BiliClient {
         Ok(AudioStream {
             url: selected.url,
             duration,
+            cid,
             initialization_range: selected.initialization_range,
             index_range: selected.index_range,
             bandwidth: selected.bandwidth,
             codecs: selected.codecs,
         })
+    }
+
+    pub fn lyrics_for_video(&self, bvid: &str) -> Result<Lyrics, String> {
+        let (cid, _) = self.first_video_page(bvid)?;
+        self.lyrics(bvid, cid)
+    }
+
+    pub fn lyrics(&self, bvid: &str, cid: u64) -> Result<crate::lyrics::Lyrics, String> {
+        if !valid_bvid(bvid) {
+            return Err("BV 号格式不正确".to_owned());
+        }
+        if cid == 0 {
+            return Err("字幕 CID 必须大于 0".to_owned());
+        }
+
+        let params = vec![
+            ("bvid".to_owned(), bvid.to_owned()),
+            ("cid".to_owned(), cid.to_string()),
+        ];
+        let url = self
+            .signed_wbi_url("/x/player/wbi/v2", &params)
+            .map_err(RequestError::into_message)?;
+        let payload = self
+            .get_json_url(&url, &[])
+            .map_err(RequestError::into_message)?;
+        let data = payload
+            .get("data")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "B 站播放器响应缺少数据".to_owned())?;
+        if let Some(returned_bvid) = data.get("bvid").and_then(Value::as_str)
+            && returned_bvid != bvid
+        {
+            return Err("B 站返回的 BV 号与字幕请求不一致".to_owned());
+        }
+        if let Some(returned_cid) = data
+            .get("cid")
+            .map(|value| value_to_u64(Some(value)))
+            .filter(|value| *value > 0)
+            && returned_cid != cid
+        {
+            return Err("B 站返回的 CID 与字幕请求不一致".to_owned());
+        }
+
+        let subtitle_tracks = data
+            .get("subtitle")
+            .and_then(|subtitle| subtitle.get("subtitles"))
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if subtitle_tracks.is_empty() {
+            return Ok(Lyrics::default());
+        }
+        let selected = select_subtitle_track(subtitle_tracks)
+            .ok_or_else(|| "B 站返回的字幕地址不可用".to_owned())?;
+        let bytes = Self::get_bytes_from(&self.subtitle_client, &selected.url, None)
+            .map_err(RequestError::into_message)?;
+        Lyrics::from_json(&bytes)
     }
 
     fn api_url(&self, path: &str, params: &[(String, String)]) -> Result<String, RequestError> {
@@ -960,11 +1146,19 @@ impl BiliClient {
     }
 
     fn signed_search_url(&self, params: &[(String, String)]) -> Result<String, RequestError> {
+        self.signed_wbi_url("/x/web-interface/wbi/search/type", params)
+    }
+
+    fn signed_wbi_url(
+        &self,
+        path: &str,
+        params: &[(String, String)],
+    ) -> Result<String, RequestError> {
         let mixin_key = self.wbi_mixin_key()?;
         let values = params.to_vec();
         let (query, signature) = build_wbi_query(&values, &mixin_key, unix_timestamp());
-        let mut url = Url::parse(&self.api_url("/x/web-interface/wbi/search/type", &[])?)
-            .map_err(|_| RequestError::Data("B 站搜索地址格式不正确".to_owned()))?;
+        let mut url = Url::parse(&self.api_url(path, &[])?)
+            .map_err(|_| RequestError::Data("B 站接口地址格式不正确".to_owned()))?;
         url.set_query(Some(&format!("{query}&w_rid={signature}")));
         Ok(url.into())
     }
@@ -1058,8 +1252,15 @@ impl BiliClient {
         } else {
             None
         };
-        let mut request = self
-            .client
+        Self::get_bytes_from(&self.client, url, cookie)
+    }
+
+    fn get_bytes_from(
+        client: &Client,
+        url: &str,
+        cookie: Option<String>,
+    ) -> Result<Vec<u8>, RequestError> {
+        let mut request = client
             .get(url)
             .header("Accept", "application/json, text/plain, */*")
             .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.7")
@@ -1431,6 +1632,125 @@ mod tests {
     }
 
     #[test]
+    fn subtitle_urls_require_https_and_bilibili_cdn_hosts() {
+        assert_eq!(
+            normalize_subtitle_url("//aisubtitle.hdslb.com/bfs/subtitle/BV1xx411c7mD.json#ignored")
+                .unwrap(),
+            "https://aisubtitle.hdslb.com/bfs/subtitle/BV1xx411c7mD.json"
+        );
+        for source in [
+            "http://aisubtitle.hdslb.com/bfs/subtitle/a.json",
+            "https://hdslb.com.evil.test/a.json",
+            "https://user@aisubtitle.hdslb.com/a.json",
+            "https://aisubtitle.hdslb.com:444/a.json",
+            "https://127.0.0.1/a.json",
+            "https://aisubtitle.hdslb.com/",
+        ] {
+            assert!(normalize_subtitle_url(source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
+    fn subtitle_track_selection_prefers_human_simplified_chinese_then_falls_back() {
+        let tracks: Vec<Value> = serde_json::from_str(
+            r#"[
+                {
+                    "lan": "zh-Hant",
+                    "lan_doc": "中文（繁体）",
+                    "subtitle_url": "https://i0.hdslb.com/traditional.json"
+                },
+                {
+                    "lan": "en-US",
+                    "lan_doc": "English",
+                    "subtitle_url": "https://i0.hdslb.com/english.json"
+                },
+                {
+                    "lan": "ai-zh",
+                    "lan_doc": "中文（简体）",
+                    "ai_type": 1,
+                    "subtitle_url": "https://i0.hdslb.com/ai-simplified.json"
+                },
+                {
+                    "lan": "zh-Hans",
+                    "lan_doc": "中文（简体）",
+                    "subtitle_url": "https://i0.hdslb.com/human-simplified.json"
+                },
+                {
+                    "lan": "zh-CN",
+                    "lan_doc": "不受信任地址",
+                    "subtitle_url": "https://evil.example/subtitle.json"
+                }
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            select_subtitle_track(&tracks).unwrap().url,
+            "https://i0.hdslb.com/human-simplified.json"
+        );
+
+        let chinese_fallbacks: Vec<Value> = serde_json::from_str(
+            r#"[
+                {"lan":"en-US","lan_doc":"English","subtitle_url":"https://i0.hdslb.com/en.json"},
+                {"lan":"ai-zh","lan_doc":"中文（自动生成）","subtitle_url":"https://i0.hdslb.com/ai-zh.json"},
+                {"lan":"zh-Hant","lan_doc":"中文（繁体）","subtitle_url":"https://i0.hdslb.com/hant.json"}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            select_subtitle_track(&chinese_fallbacks).unwrap().url,
+            "https://i0.hdslb.com/hant.json"
+        );
+
+        let fallback: Vec<Value> = serde_json::from_str(
+            r#"[
+                {"lan":"ja","lan_doc":"日本語","subtitle_url":"https://i0.hdslb.com/ja.json"},
+                {"lan":"en-US","lan_doc":"English","subtitle_url":"https://i0.hdslb.com/en.json"}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            select_subtitle_track(&fallback).unwrap().url,
+            "https://i0.hdslb.com/ja.json"
+        );
+    }
+
+    #[test]
+    fn lyrics_uses_signed_player_endpoint_and_accepts_no_subtitles() {
+        let (base, requests, handle) = mocked_json_server(
+            r#"{
+                "code": 0,
+                "data": {
+                    "bvid": "BV1xx411c7mD",
+                    "cid": 101,
+                    "subtitle": {"subtitles": []}
+                }
+            }"#,
+        );
+        let client = BiliClient::with_api_base(base).expect("create test client");
+        *client.wbi_cache.lock().unwrap() = Some(WbiCache {
+            mixin_key: "a".repeat(32),
+            expires_at: Instant::now() + Duration::from_secs(60),
+        });
+
+        let lyrics = client.lyrics("BV1xx411c7mD", 101).unwrap();
+
+        assert!(lyrics.is_empty());
+        let request = requests.recv().expect("player request line");
+        assert!(request.contains("/x/player/wbi/v2"));
+        assert!(request.contains("bvid=BV1xx411c7mD"));
+        assert!(request.contains("cid=101"));
+        assert!(request.contains("w_rid="));
+        handle.join().expect("mock server should finish");
+    }
+
+    #[test]
+    fn lyrics_rejects_invalid_identity_before_network_access() {
+        let client = BiliClient::with_api_base("https://api.bilibili.com".to_owned()).unwrap();
+        assert!(client.lyrics("not-a-bvid", 1).is_err());
+        assert!(client.lyrics("BV1xx411c7mD", 0).is_err());
+    }
+
+    #[test]
     fn resolve_uses_first_page_cid_and_highest_valid_ordinary_aac() {
         let (base, requests, handle) = mocked_json_sequence(vec![
             r#"{
@@ -1501,6 +1821,7 @@ mod tests {
             AudioStream {
                 url: "https://upos-sz-mirrorcos.bilivideo.com/selected.m4s".to_owned(),
                 duration: 321,
+                cid: 101,
                 initialization_range: "0-767".to_owned(),
                 index_range: "768-1023".to_owned(),
                 bandwidth: 192000,
