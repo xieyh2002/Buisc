@@ -2,7 +2,7 @@ use super::*;
 use std::time::Duration;
 
 impl Ui {
-    pub(super) fn load_lyrics(&self, generation: u64, bvid: &str, cid: u64) {
+    pub(super) fn load_lyrics(&self, generation: u64, bvid: &str, cid: Option<u64>) {
         self.lyrics_generation.set(Some(generation));
         if self.lyrics_inflight.get() {
             *self.pending_lyrics.borrow_mut() = Some((generation, bvid.to_owned(), cid));
@@ -11,12 +11,16 @@ impl Ui {
         }
     }
 
-    fn fetch_lyrics(&self, generation: u64, bvid: String, cid: u64) {
+    fn fetch_lyrics(&self, generation: u64, bvid: String, cid: Option<u64>) {
         self.lyrics_inflight.set(true);
         let api = self.api.clone();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let lyrics = api.lyrics(&bvid, cid).unwrap_or_default();
+            let lyrics = match cid {
+                Some(cid) => api.lyrics(&bvid, cid),
+                None => api.lyrics_for_video(&bvid),
+            }
+            .unwrap_or_default();
             let _ = tx.send_blocking(Event::Lyrics(generation, lyrics));
         });
     }

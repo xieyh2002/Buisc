@@ -38,7 +38,7 @@ impl Ui {
             Some("取消"),
         );
         chooser.set_current_name(&audio_filename(&track.title));
-        if let Some(directory) = glib::user_special_dir(glib::UserDirectory::Downloads) {
+        if let Some(directory) = glib::user_special_dir(glib::UserDirectory::Music) {
             let _ = chooser.set_current_folder(Some(&gio::File::for_path(directory)));
         }
         let filter = gtk::FileFilter::new();
@@ -62,18 +62,85 @@ impl Ui {
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                     let cancel = ui.download_cancel.clone();
                     let api = ui.api.clone();
-                    let bvid = track.bvid.clone();
+                    let track = track.clone();
                     let tx = ui.tx.clone();
                     std::thread::spawn(move || {
-                        let result = api.resolve(&bvid).and_then(|stream| {
+                        let result = api.resolve(&track.bvid).and_then(|stream| {
                             crate::download::save_audio(&stream.url, &path, &cancel)
                         });
-                        let _ = tx.send_blocking(Event::Download(path, result));
+                        let _ = tx.send_blocking(Event::Download(Box::new(track), path, result));
                     });
                 } else {
                     ui.downloading.set(false);
                     ui.download_button.set_sensitive(true);
                 }
+            }
+            chooser.destroy();
+        });
+        chooser.show();
+    }
+
+    pub(super) fn record_download(self: &Rc<Self>, track: &Track, path: PathBuf) -> String {
+        let destination = path.display().to_string();
+        match self.save_download_link(track, path) {
+            Ok(()) => format!("音频已保存，可在 Buisc 离线播放：{destination}"),
+            Err(error) => format!("音频已保存，但离线关联保存失败：{error}"),
+        }
+    }
+
+    fn save_download_link(self: &Rc<Self>, track: &Track, path: PathBuf) -> Result<(), String> {
+        let path = path.canonicalize().map_err(|error| error.to_string())?;
+        self.downloads.borrow_mut().link(track, path);
+        self.save_download_index()
+    }
+
+    fn save_download_index(self: &Rc<Self>) -> Result<(), String> {
+        let result = storage::save_downloads(
+            &self.path.with_file_name("downloads.json"),
+            &self.downloads.borrow(),
+        );
+        if *self.route.borrow() == Route::Downloads {
+            self.navigate(Route::Downloads);
+        }
+        result
+    }
+
+    pub(super) fn unlink_local_audio(self: &Rc<Self>, track: &Track) {
+        self.downloads.borrow_mut().remove(&track.bvid);
+        self.status.set_text(&match self.save_download_index() {
+            Ok(()) => "已移除离线关联，音频文件仍在原位置。".to_owned(),
+            Err(error) => format!("离线关联保存失败：{error}"),
+        });
+    }
+
+    pub(super) fn link_local_audio(self: &Rc<Self>) {
+        let Some(track) = self.selected() else {
+            self.status.set_text("请先选中要关联的曲目。");
+            return;
+        };
+        let chooser = gtk::FileChooserNative::new(
+            Some("关联已下载的音频"),
+            Some(&self.window),
+            gtk::FileChooserAction::Open,
+            Some("关联"),
+            Some("取消"),
+        );
+        if let Some(directory) = glib::user_special_dir(glib::UserDirectory::Downloads) {
+            let _ = chooser.set_current_folder(Some(&gio::File::for_path(directory)));
+        }
+        let weak = Rc::downgrade(self);
+        chooser.connect_response(move |chooser, response| {
+            if response == gtk::ResponseType::Accept
+                && let Some(ui) = weak.upgrade()
+            {
+                let message = match chooser.file().and_then(|file| file.path()) {
+                    Some(path) if path.is_file() => match ui.save_download_link(&track, path) {
+                        Ok(()) => format!("「{}」已关联，可离线播放。", track.title),
+                        Err(error) => format!("离线关联保存失败：{error}"),
+                    },
+                    _ => "请选择本机上的已下载音频。".to_owned(),
+                };
+                ui.status.set_text(&message);
             }
             chooser.destroy();
         });

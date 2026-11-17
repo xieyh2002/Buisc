@@ -967,7 +967,7 @@ impl BiliClient {
         Ok(tracks)
     }
 
-    pub fn resolve(&self, bvid: &str) -> Result<AudioStream, String> {
+    fn first_video_page(&self, bvid: &str) -> Result<(u64, u64), String> {
         if !valid_bvid(bvid) {
             return Err("BV 号格式不正确".to_owned());
         }
@@ -1010,6 +1010,11 @@ impl BiliClient {
             .map(value_to_duration)
             .or_else(|| view_data.get("duration").map(value_to_duration))
             .unwrap_or_default();
+        Ok((cid, duration))
+    }
+
+    pub fn resolve(&self, bvid: &str) -> Result<AudioStream, String> {
+        let (cid, duration) = self.first_video_page(bvid)?;
         let play_url = self
             .api_url(
                 "/x/player/playurl",
@@ -1067,6 +1072,11 @@ impl BiliClient {
             bandwidth: selected.bandwidth,
             codecs: selected.codecs,
         })
+    }
+
+    pub fn lyrics_for_video(&self, bvid: &str) -> Result<Lyrics, String> {
+        let (cid, _) = self.first_video_page(bvid)?;
+        self.lyrics(bvid, cid)
     }
 
     pub fn lyrics(&self, bvid: &str, cid: u64) -> Result<crate::lyrics::Lyrics, String> {

@@ -593,7 +593,9 @@ impl Ui {
             move |result| {
                 if let Some(ui) = weak.upgrade() {
                     ui.report_inflight.set(false);
-                    if let Err(error) = result {
+                    if let Err(error) = result
+                        && !ui.playing_local.get()
+                    {
                         ui.status
                             .set_text(&format!("本地记录已保存，B站同步失败：{error}"));
                     }

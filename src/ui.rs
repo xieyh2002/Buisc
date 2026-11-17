@@ -27,6 +27,7 @@ enum Route {
     Favorites,
     History,
     Queue,
+    Downloads,
     Playlist(String),
     RemoteFavorites,
     RemoteFolder(u64, String),
@@ -37,7 +38,7 @@ enum Event {
     Stream(u64, Box<Track>, Result<AudioStream, String>),
     Cover(u64, Result<Vec<u8>, String>),
     Lyrics(u64, Lyrics),
-    Download(PathBuf, Result<(), String>),
+    Download(Box<Track>, PathBuf, Result<(), String>),
 }
 
 pub struct Ui {
@@ -51,6 +52,8 @@ pub struct Ui {
     audio: RefCell<Option<AudioPlayer>>,
     lib: RefCell<Library>,
     path: PathBuf,
+    downloads: RefCell<storage::DownloadIndex>,
+    playing_local: Cell<bool>,
     route: RefCell<Route>,
     current: RefCell<Option<Track>>,
     shown: RefCell<Vec<Track>>,
@@ -72,7 +75,7 @@ pub struct Ui {
     lyrics: RefCell<Lyrics>,
     lyrics_generation: Cell<Option<u64>>,
     lyrics_inflight: Cell<bool>,
-    pending_lyrics: RefCell<Option<(u64, String, u64)>>,
+    pending_lyrics: RefCell<Option<(u64, String, Option<u64>)>>,
     lyrics_timer: RefCell<Option<glib::SourceId>>,
     cover_stack: gtk::Stack,
     cover_picture: gtk::Picture,
@@ -159,6 +162,11 @@ impl Ui {
                 path.with_file_name("library.recovered.json"),
             ),
         };
+        let (downloads, warning) =
+            match storage::load_downloads(&path.with_file_name("downloads.json")) {
+                Ok(downloads) => (downloads, warning),
+                Err(error) => (storage::DownloadIndex::default(), warning.or(Some(error))),
+            };
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.add_css_class("app-content");
         let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -192,6 +200,7 @@ impl Ui {
             ("本地收藏", Icon::Heart),
             ("最近播放", Icon::History),
             ("播放队列", Icon::Queue),
+            ("已下载", Icon::Download),
             ("B站收藏夹", Icon::Cloud),
             ("B站历史", Icon::History),
         ] {
@@ -282,6 +291,8 @@ impl Ui {
         tools.append(&add_playlist);
         let bili_favorite = button("B站收藏", "");
         tools.append(&bili_favorite);
+        let link_audio = button("关联本地音频", "");
+        tools.append(&link_audio);
         let remove = button("移除", "");
         tools.append(&remove);
         list_panel.append(&tools);
@@ -480,6 +491,8 @@ impl Ui {
             audio: RefCell::new(None),
             lib: RefCell::new(lib),
             path,
+            downloads: RefCell::new(downloads),
+            playing_local: Cell::new(false),
             route: RefCell::new(Route::Discover),
             current: RefCell::new(None),
             shown: RefCell::new(vec![]),
@@ -600,6 +613,7 @@ impl Ui {
         });
         clicked!(add_playlist, |ui: Rc<Self>| ui.choose_playlist());
         clicked!(bili_favorite, |ui: Rc<Self>| ui.favorite_remote());
+        clicked!(link_audio, |ui: Rc<Self>| ui.link_local_audio());
         clicked!(ui.account_button, |ui: Rc<Self>| ui.account_dialog());
         clicked!(remove, |ui: Rc<Self>| ui.remove_selected());
         clicked!(new_playlist, |ui: Rc<Self>| ui.new_playlist());
@@ -630,7 +644,8 @@ impl Ui {
                         2 => Route::Favorites,
                         3 => Route::History,
                         4 => Route::Queue,
-                        5 => Route::RemoteFavorites,
+                        5 => Route::Downloads,
+                        6 => Route::RemoteFavorites,
                         _ => Route::RemoteHistory,
                     };
                     if *ui.route.borrow() != route {
@@ -881,8 +896,9 @@ impl Ui {
             Route::Favorites => Some(2),
             Route::History => Some(3),
             Route::Queue => Some(4),
-            Route::RemoteFavorites => Some(5),
-            Route::RemoteHistory => Some(6),
+            Route::Downloads => Some(5),
+            Route::RemoteFavorites => Some(6),
+            Route::RemoteHistory => Some(7),
             Route::Playlist(_) | Route::RemoteFolder(_, _) => None,
         };
         self.nav
@@ -925,6 +941,13 @@ impl Ui {
                 self.set_tracks(self.lib.borrow().queue.clone());
                 self.status
                     .set_text("按队列顺序播放，顺序模式到末尾会停止。");
+            }
+            Route::Downloads => {
+                self.heading.set_text("已下载");
+                self.set_tracks(self.downloads.borrow().tracks());
+                self.empty
+                    .set_text("下载歌曲或关联已有音频后，即可在此离线播放。");
+                self.status.set_text("双击播放已下载的音频文件。");
             }
             Route::RemoteFavorites => {
                 self.heading.set_text("B站收藏夹");
@@ -1039,11 +1062,11 @@ impl Ui {
         }
         match event {
             Event::Lyrics(generation, lyrics) => self.receive_lyrics(generation, lyrics),
-            Event::Download(path, result) => {
+            Event::Download(track, path, result) => {
                 self.downloading.set(false);
                 self.download_button.set_sensitive(true);
                 self.status.set_text(&match result {
-                    Ok(()) => format!("音频已保存：{}", path.display()),
+                    Ok(()) => self.record_download(&track, path),
                     Err(error) => format!("下载失败：{error}"),
                 });
             }
@@ -1120,14 +1143,6 @@ impl Ui {
                 }
                 match result {
                     Ok(stream) => {
-                        *self.current.borrow_mut() = Some(track.clone());
-                        self.now_title.set_text(&track.title);
-                        self.now_title.set_tooltip_text(Some(&track.title));
-                        self.now_artist.set_text(&track.artist);
-                        self.load_cover(generation, &track.cover);
-                        self.seek.set_range(0., stream.duration.max(1) as f64);
-                        self.seek.set_sensitive(true);
-                        self.seek.set_value(0.);
                         let result = self
                             .audio
                             .borrow()
@@ -1150,15 +1165,12 @@ impl Ui {
                                 }
                             });
                         match result {
-                            Ok(()) => {
-                                self.stopped.set(false);
-                                self.load_lyrics(generation, &track.bvid, stream.cid);
-                                self.lib.borrow_mut().remember(track);
-                                self.schedule_save();
-                                self.status.set_text("正在缓冲音频…");
-                                self.update_favorite();
-                                self.notify_mpris();
-                            }
+                            Ok(()) => self.playback_started(
+                                generation,
+                                track,
+                                stream.duration,
+                                Some(stream.cid),
+                            ),
                             Err(e) => self.status.set_text(&e),
                         }
                     }
@@ -1212,6 +1224,56 @@ impl Ui {
         self.enqueue(track.clone());
         let generation = self.play_generation.get() + 1;
         self.play_generation.set(generation);
+        self.pending_stream.borrow_mut().take();
+        self.playing_local.set(false);
+        let playing_local = self
+            .downloads
+            .borrow()
+            .path_for(&track.bvid)
+            .is_some_and(|path| {
+                self.audio
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|audio| audio.load_local(path).is_ok())
+            });
+        if playing_local {
+            let duration = track.duration;
+            self.playing_local.set(true);
+            self.playback_started(generation, track, duration, None);
+        } else {
+            self.request_stream(generation, track);
+        }
+    }
+
+    fn playback_started(
+        self: &Rc<Self>,
+        generation: u64,
+        track: Track,
+        duration: u64,
+        cid: Option<u64>,
+    ) {
+        self.stopped.set(false);
+        self.now_title.set_text(&track.title);
+        self.now_title.set_tooltip_text(Some(&track.title));
+        self.now_artist.set_text(&track.artist);
+        self.load_cover(generation, &track.cover);
+        self.load_lyrics(generation, &track.bvid, cid);
+        self.seek.set_range(0., duration.max(1) as f64);
+        self.seek.set_sensitive(true);
+        self.seek.set_value(0.);
+        *self.current.borrow_mut() = Some(track.clone());
+        self.lib.borrow_mut().remember(track);
+        self.schedule_save();
+        self.status.set_text(if self.playing_local.get() {
+            "正在打开已下载音频…"
+        } else {
+            "正在缓冲音频…"
+        });
+        self.update_favorite();
+        self.notify_mpris();
+    }
+
+    fn request_stream(&self, generation: u64, track: Track) {
         self.status.set_text(&format!("正在解析：{}", track.title));
         if self.stream_inflight.get() {
             *self.pending_stream.borrow_mut() = Some((generation, track));
@@ -1357,6 +1419,10 @@ impl Ui {
             return;
         };
         let route = self.route.borrow().clone();
+        if route == Route::Downloads {
+            self.unlink_local_audio(&track);
+            return;
+        }
         let mut lib = self.lib.borrow_mut();
         match &route {
             Route::Favorites => lib.favorites.retain(|t| t.id != track.id),
@@ -1393,7 +1459,11 @@ impl Ui {
             AudioEvent::Playing(playing) => {
                 icons::set_play(&self.play_button, playing);
                 if playing {
-                    self.status.set_text("正在播放 · 仅音频流，无视频解码");
+                    self.status.set_text(if self.playing_local.get() {
+                        "正在播放 · 已下载音频"
+                    } else {
+                        "正在播放 · 仅音频流，无视频解码"
+                    });
                     self.ensure_timer();
                     self.ensure_lyrics_timer();
                 } else {
@@ -1859,6 +1929,71 @@ impl Ui {
 mod integration_tests {
     use super::*;
     use std::time::{Duration, Instant};
+    fn write_silent_wav(path: &std::path::Path, seconds: u32) {
+        let sample_rate = 8000u32;
+        let data_size = sample_rate * 2 * seconds;
+        let mut wav = Vec::with_capacity((44 + data_size) as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_size).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&sample_rate.to_le_bytes());
+        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_size.to_le_bytes());
+        wav.resize((44 + data_size) as usize, 0);
+        std::fs::write(path, wav).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires a desktop session and an isolated XDG_DATA_HOME"]
+    fn native_downloaded_audio() {
+        assert_eq!(std::env::var("BILI_MUSIC_TEST").as_deref(), Ok("1"));
+        assert!(
+            std::env::var("XDG_DATA_HOME")
+                .unwrap()
+                .contains("bili-test-")
+        );
+        gtk::init().unwrap();
+        gstreamer::init().unwrap();
+        let app = gtk::Application::builder()
+            .application_id("io.github.bilimusic.Test")
+            .build();
+        app.register(gio::Cancellable::NONE).unwrap();
+        let ui = Ui::new(&app).unwrap();
+        let path = ui.path.with_file_name("下载测试 静音.wav");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        write_silent_wav(&path, 10);
+        let track = Track {
+            id: "BV1BDk2YCEHF".into(),
+            bvid: "BV1BDk2YCEHF".into(),
+            title: "已下载的测试音频".into(),
+            duration: 10,
+            ..Default::default()
+        };
+
+        ui.handle(Event::Download(
+            Box::new(track.clone()),
+            path.clone(),
+            Ok(()),
+        ));
+        let saved = storage::load_downloads(&ui.path.with_file_name("downloads.json")).unwrap();
+        assert_eq!(saved.path_for(&track.bvid), Some(path.as_path()));
+        ui.navigate(Route::Downloads);
+        assert_eq!(*ui.shown.borrow(), vec![track.clone()]);
+        ui.set_volume(0.);
+        ui.play_all();
+        wait_until(5, || ui.playing() && ui.position() >= 1);
+        assert!(ui.playing_local.get());
+        assert!(!ui.stream_inflight.get());
+        assert_eq!(ui.status.text(), "正在播放 · 已下载音频");
+        ui.stop();
+    }
+
     fn wait_until(timeout: u64, test: impl Fn() -> bool) {
         let context = glib::MainContext::default();
         let start = Instant::now();
@@ -2074,23 +2209,7 @@ mod integration_tests {
         // Real, silent GStreamer playback verifies that close-to-tray does not
         // stop the audio pipeline. The fixture stays in the isolated test data.
         let wav_path = ui.path.with_file_name("tray-test-silence.wav");
-        let sample_rate = 8000u32;
-        let data_size = sample_rate * 2 * 30;
-        let mut wav = Vec::with_capacity((44 + data_size) as usize);
-        wav.extend_from_slice(b"RIFF");
-        wav.extend_from_slice(&(36 + data_size).to_le_bytes());
-        wav.extend_from_slice(b"WAVEfmt ");
-        wav.extend_from_slice(&16u32.to_le_bytes());
-        wav.extend_from_slice(&1u16.to_le_bytes());
-        wav.extend_from_slice(&1u16.to_le_bytes());
-        wav.extend_from_slice(&sample_rate.to_le_bytes());
-        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes());
-        wav.extend_from_slice(&2u16.to_le_bytes());
-        wav.extend_from_slice(&16u16.to_le_bytes());
-        wav.extend_from_slice(b"data");
-        wav.extend_from_slice(&data_size.to_le_bytes());
-        wav.resize((44 + data_size) as usize, 0);
-        std::fs::write(&wav_path, wav).unwrap();
+        write_silent_wav(&wav_path, 30);
         *ui.current.borrow_mut() = Some(Track {
             id: "BV1BDk2YCEHF".into(),
             bvid: "BV1BDk2YCEHF".into(),
