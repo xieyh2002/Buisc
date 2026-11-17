@@ -4,9 +4,11 @@ mod download_ui;
 mod glass;
 mod icons;
 mod smooth_scroll;
+mod subtitle_lyrics;
 use crate::{
     api::{AudioStream, BiliClient, SearchResult, Track},
     audio::{AudioEvent, AudioPlayer},
+    lyrics::Lyrics,
     storage::{self, Library},
 };
 use gtk::{gio, glib, prelude::*};
@@ -34,6 +36,7 @@ enum Event {
     List(u64, Result<SearchResult, String>, bool),
     Stream(u64, Box<Track>, Result<AudioStream, String>),
     Cover(u64, Result<Vec<u8>, String>),
+    Lyrics(u64, Lyrics),
     Download(PathBuf, Result<(), String>),
 }
 
@@ -65,6 +68,12 @@ pub struct Ui {
     play_button: gtk::Button,
     now_title: gtk::Label,
     now_artist: gtk::Label,
+    lyric_line: gtk::Label,
+    lyrics: RefCell<Lyrics>,
+    lyrics_generation: Cell<Option<u64>>,
+    lyrics_inflight: Cell<bool>,
+    pending_lyrics: RefCell<Option<(u64, String, u64)>>,
+    lyrics_timer: RefCell<Option<glib::SourceId>>,
     cover_stack: gtk::Stack,
     cover_picture: gtk::Picture,
     favorite_button: gtk::Button,
@@ -150,11 +159,8 @@ impl Ui {
                 path.with_file_name("library.recovered.json"),
             ),
         };
-        // Keep client-side resize borders without a separate titlebar row.
-        let titlebar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        titlebar.set_visible(false);
-        window.set_titlebar(Some(&titlebar));
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.add_css_class("app-content");
         let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         body.set_vexpand(true);
         root.append(&body);
@@ -169,9 +175,7 @@ impl Ui {
         brand_row.set_margin_bottom(5);
         brand_row.append(&icons::artwork(30));
         brand_row.append(&label("Buisc", "brand"));
-        let brand_handle = gtk::WindowHandle::new();
-        brand_handle.set_child(Some(&brand_row));
-        sidebar.append(&brand_handle);
+        sidebar.append(&brand_row);
         let tagline = label("Bilibili 音乐播放器", "tagline");
         tagline.set_margin_start(28);
         tagline.set_margin_bottom(24);
@@ -240,7 +244,6 @@ impl Ui {
         let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
         content.set_vexpand(true);
         margins(&content, 30);
-        content.set_margin_top(44);
         content.set_margin_bottom(8);
         main.append(&content);
         let top = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -253,17 +256,7 @@ impl Ui {
         top.append(&search);
         let search_button = button("搜索", "primary");
         top.append(&search_button);
-        let window_controls = gtk::WindowControls::new(gtk::PackType::End);
-        window_controls.set_decoration_layout(Some(":minimize,maximize,close"));
-        window_controls.add_css_class("corner-window-controls");
-        window_controls.set_halign(gtk::Align::End);
-        window_controls.set_valign(gtk::Align::Start);
-        window_controls.set_margin_top(6);
-        window_controls.set_margin_end(8);
-        main_overlay.add_overlay(&window_controls);
-        let top_handle = gtk::WindowHandle::new();
-        top_handle.set_child(Some(&top));
-        content.append(&top_handle);
+        content.append(&top);
         let heading = label("音乐热榜", "heading");
         heading.set_margin_top(12);
         content.append(&heading);
@@ -463,6 +456,12 @@ impl Ui {
         progress.append(&seek);
         progress.append(&clock);
         center.append(&progress);
+        let lyric_line = gtk::Label::new(None);
+        lyric_line.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        lyric_line.set_single_line_mode(true);
+        lyric_line.set_max_width_chars(36);
+        lyric_line.set_visible(false);
+        center.append(&lyric_line);
         player.append(&center);
         body.append(&glass::GlassPane::new(&main_overlay, &player));
         window.set_child(Some(&root));
@@ -498,6 +497,12 @@ impl Ui {
             play_button,
             now_title,
             now_artist,
+            lyric_line,
+            lyrics: RefCell::new(Lyrics::default()),
+            lyrics_generation: Cell::new(None),
+            lyrics_inflight: Cell::new(false),
+            pending_lyrics: RefCell::new(None),
+            lyrics_timer: RefCell::new(None),
             cover_stack: art,
             cover_picture,
             favorite_button,
@@ -676,10 +681,8 @@ impl Ui {
             ui.seek.connect_change_value(move |_, _, value| {
                 if let Some(ui) = weak.upgrade()
                     && !ui.updating_seek.get()
-                    && let Some(a) = ui.audio.borrow().as_ref()
-                    && let Err(error) = a.seek(value.max(0.) as u64)
                 {
-                    ui.status.set_text(&error);
+                    ui.seek_to(value.max(0.) as u64);
                 }
                 glib::Propagation::Proceed
             });
@@ -1035,6 +1038,7 @@ impl Ui {
                 .set(self.active_requests.get().saturating_sub(1));
         }
         match event {
+            Event::Lyrics(generation, lyrics) => self.receive_lyrics(generation, lyrics),
             Event::Download(path, result) => {
                 self.downloading.set(false);
                 self.download_button.set_sensitive(true);
@@ -1148,6 +1152,7 @@ impl Ui {
                         match result {
                             Ok(()) => {
                                 self.stopped.set(false);
+                                self.load_lyrics(generation, &track.bvid, stream.cid);
                                 self.lib.borrow_mut().remember(track);
                                 self.schedule_save();
                                 self.status.set_text("正在缓冲音频…");
@@ -1200,6 +1205,7 @@ impl Ui {
         self.sync_history(true);
         self.stopped.set(true);
         self.remove_timer();
+        self.clear_lyrics();
         if let Some(a) = self.audio.borrow().as_ref() {
             a.stop();
         }
@@ -1280,6 +1286,7 @@ impl Ui {
         self.sync_history(true);
         self.stopped.set(true);
         self.remove_timer();
+        self.clear_lyrics();
         self.play_generation.set(self.play_generation.get() + 1);
         if let Some(a) = self.audio.borrow().as_ref() {
             a.stop();
@@ -1378,6 +1385,7 @@ impl Ui {
             AudioEvent::Error(e) => {
                 self.stopped.set(true);
                 self.remove_timer();
+                self.clear_lyrics();
                 self.status.set_text(&format!("音频播放失败：{e}"));
                 icons::set_play(&self.play_button, false);
                 self.notify_mpris();
@@ -1387,6 +1395,7 @@ impl Ui {
                 if playing {
                     self.status.set_text("正在播放 · 仅音频流，无视频解码");
                     self.ensure_timer();
+                    self.ensure_lyrics_timer();
                 } else {
                     self.remove_timer();
                 }
@@ -1431,6 +1440,7 @@ impl Ui {
         if let Some(id) = self.timer.borrow_mut().take() {
             id.remove();
         }
+        self.remove_lyrics_timer();
     }
     fn schedule_save(self: &Rc<Self>) {
         if let Some(id) = self.pending_save.borrow_mut().take() {
@@ -1481,6 +1491,8 @@ impl Ui {
         entry.set_placeholder_text(Some("歌单名称"));
         entry.set_max_length(60);
         margins(&entry, 20);
+        dialog.content_area().add_css_class("app-content");
+        dialog.content_area().add_css_class("dialog-content");
         dialog.content_area().append(&entry);
         dialog.set_default_response(gtk::ResponseType::Accept);
         entry.set_activates_default(true);
@@ -1530,6 +1542,8 @@ impl Ui {
         let strings: Vec<_> = names.iter().map(String::as_str).collect();
         let choice = gtk::DropDown::from_strings(&strings);
         margins(&choice, 20);
+        dialog.content_area().add_css_class("app-content");
+        dialog.content_area().add_css_class("dialog-content");
         dialog.content_area().append(&choice);
         let weak = Rc::downgrade(self);
         dialog.connect_response(move |d, r| {
@@ -1575,10 +1589,6 @@ impl Ui {
             .default_width(550)
             .resizable(false)
             .build();
-        let header = gtk::HeaderBar::new();
-        header.set_decoration_layout(Some(":close"));
-        header.set_title_widget(Some(&label("设置与备份", "window-title")));
-        dialog.set_titlebar(Some(&header));
         let keys = gtk::EventControllerKey::new();
         let weak = Rc::downgrade(self);
         keys.connect_key_pressed(move |_, key, _, _| {
@@ -1593,6 +1603,8 @@ impl Ui {
         });
         dialog.add_controller(keys);
         let area = gtk::Box::new(gtk::Orientation::Vertical, 15);
+        area.add_css_class("app-content");
+        area.add_css_class("dialog-content");
         dialog.set_child(Some(&area));
         area.set_spacing(15);
         margins(&area, 24);
@@ -1826,10 +1838,11 @@ impl Ui {
         }
     }
     pub fn seek_to(&self, seconds: u64) {
-        if let Some(a) = self.audio.borrow().as_ref()
-            && let Err(error) = a.seek(seconds)
-        {
-            self.status.set_text(&error);
+        if let Some(a) = self.audio.borrow().as_ref() {
+            match a.seek(seconds) {
+                Ok(()) => self.update_lyric(seconds.saturating_mul(1_000)),
+                Err(error) => self.status.set_text(&error),
+            }
         }
     }
     pub fn notify_mpris(&self) {
@@ -1930,15 +1943,6 @@ mod integration_tests {
         }
         None
     }
-    fn click_window_close(window: &gtk::Window) {
-        let close = find_widget(window.upcast_ref(), &|widget| {
-            widget.is::<gtk::Button>() && widget.has_css_class("close")
-        })
-        .and_downcast::<gtk::Button>()
-        .expect("window close button");
-        close.emit_clicked();
-    }
-
     fn dbus_call(
         connection: &gio::DBusConnection,
         destination: &str,
@@ -2185,7 +2189,7 @@ mod integration_tests {
         ui.settings();
         let settings = ui.settings_window.borrow().clone().unwrap();
         pump(1);
-        click_window_close(&settings);
+        settings.close();
         pump(1);
         assert!(!settings.is_visible());
         assert!(ui.settings_window.borrow().is_none());
@@ -2194,7 +2198,7 @@ mod integration_tests {
         ui.settings();
         assert_eq!(ui.settings_window.borrow().as_ref(), Some(&settings));
         pump(1);
-        click_window_close(ui.window.upcast_ref());
+        ui.window.close();
         pump(1);
         assert!(!settings.is_visible());
         assert!(ui.settings_window.borrow().is_none());
@@ -2355,7 +2359,7 @@ mod integration_tests {
             ui.window.renderer().unwrap().type_().name()
         );
         assert!(ui.window.width() >= 860);
-        assert!(!ui.window.titlebar().unwrap().is_visible());
+        assert!(ui.window.titlebar().is_none());
         let main = find_widget(ui.window.upcast_ref(), &|widget| {
             widget.widget_name() == "main-pane"
         })
@@ -2369,12 +2373,30 @@ mod integration_tests {
         assert_eq!(player.halign(), gtk::Align::Center);
         assert_eq!(pane.first_child(), main.parent());
         assert!(player.width() <= main.width());
-        let controls = find_widget(ui.window.upcast_ref(), &|widget| {
-            widget.is::<gtk::WindowControls>()
-        })
-        .unwrap();
-        assert!(controls.is_mapped());
+        assert!(
+            find_widget(&ui.window.child().unwrap(), &|widget| {
+                widget.is::<gtk::WindowControls>() || widget.is::<gtk::WindowHandle>()
+            })
+            .is_none()
+        );
+        ui.window.maximize();
+        wait_until(5, || ui.window.is_maximized());
+        ui.window.unmaximize();
+        wait_until(5, || !ui.window.is_maximized());
+        ui.window.fullscreen();
+        wait_until(5, || ui.window.is_fullscreen());
+        ui.window.unfullscreen();
+        wait_until(5, || !ui.window.is_fullscreen());
         assert!(ui.discovery.scroll.is_visible());
+        assert!(!ui.discovery.scroll.is_overlay_scrolling());
+        let demo_tracks = vec![Track::default(); 21];
+        ui.discovery.render(&ui, &demo_tracks);
+        pump(1);
+        let scroll = &ui.discovery.scroll;
+        let viewport = scroll.child().unwrap().compute_bounds(scroll).unwrap();
+        let scrollbar = scroll.vscrollbar();
+        assert!(scrollbar.is_mapped());
+        assert!(viewport.x() + viewport.width() <= scrollbar.compute_bounds(scroll).unwrap().x());
         assert!(!ui.list_panel.is_visible());
         if !ui.shown.borrow().is_empty() {
             let full_chart = find_widget(ui.window.upcast_ref(), &|widget| {
@@ -2388,6 +2410,33 @@ mod integration_tests {
             assert!(ui.list_panel.is_visible());
             assert!(!ui.discovery.scroll.is_visible());
         }
+        ui.settings();
+        let settings = ui.settings_window.borrow().clone().unwrap();
+        assert!(settings.titlebar().is_none());
+        assert!(
+            find_widget(&settings.child().unwrap(), &|widget| widget
+                .is::<gtk::HeaderBar>())
+            .is_none()
+        );
+        assert!(!ui.lyric_line.is_visible());
+        let lyrics = Lyrics::from_json(
+            br#"{"body":[{"from":0,"to":1,"content":"First line"},{"from":2,"to":3,"content":"Second line"}]}"#,
+        )
+        .unwrap();
+        ui.lyrics_generation.set(Some(2));
+        ui.receive_lyrics(1, lyrics.clone());
+        assert!(!ui.lyric_line.is_visible());
+        ui.receive_lyrics(2, lyrics);
+        assert!(ui.lyric_line.is_visible());
+        assert_eq!(ui.lyric_line.text(), "First line");
+        ui.update_lyric(1_500);
+        assert!(ui.lyric_line.text().trim().is_empty());
+        ui.update_lyric(2_000);
+        assert_eq!(ui.lyric_line.text(), "Second line");
+        ui.stop();
+        assert!(!ui.lyric_line.is_visible());
+        settings.close();
+        pump(1);
         ui.window.close();
         pump(1);
     }

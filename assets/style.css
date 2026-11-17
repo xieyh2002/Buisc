@@ -1,9 +1,13 @@
-window,
-window.background {
+.app-content {
   background-color: #ffffff;
   color: #18191c;
   font-family: "Inter", "Noto Sans CJK SC", "Noto Sans", sans-serif;
   font-size: 13px;
+}
+
+.app-content.dialog-content {
+  background-color: #fff9fb;
+  color: #18191c;
 }
 
 .sidebar {
@@ -66,7 +70,7 @@ window.background {
   background-color: #e3e3e8;
 }
 
-button {
+.app-content button {
   min-height: 20px;
   padding: 7px 12px;
   background-color: #ffffff;
@@ -79,14 +83,14 @@ button {
   outline: none;
 }
 
-button:hover {
+.app-content button:hover {
   background-color: #fff2f6;
   color: #18191c;
   border-color: #d6bfc8;
 }
 
-button:active,
-button:checked {
+.app-content button:active,
+.app-content button:checked {
   background-color: #ffe8ef;
   background-image: none;
   color: #18191c;
@@ -94,19 +98,19 @@ button:checked {
   box-shadow: none;
 }
 
-button:focus {
+.app-content button:focus {
   border-color: rgba(0, 174, 236, 0.75);
   box-shadow: 0 0 0 2px rgba(0, 174, 236, 0.14);
 }
 
-button:disabled {
+.app-content button:disabled {
   background-color: #fff2f6;
   color: #9499a0;
   border-color: #f2dfe6;
   box-shadow: none;
 }
 
-button.primary {
+.app-content button.primary {
   background-color: #fb7299;
   background-image: none;
   color: #ffffff;
@@ -114,45 +118,45 @@ button.primary {
   box-shadow: 0 2px 6px rgba(251, 114, 153, 0.2);
 }
 
-button.primary:hover {
+.app-content button.primary:hover {
   background-color: #f25d8b;
   border-color: #f25d8b;
 }
 
-button.primary:active,
-button.primary:checked {
+.app-content button.primary:active,
+.app-content button.primary:checked {
   background-color: #e75f87;
   border-color: #e75f87;
   box-shadow: none;
 }
 
-button.primary:focus {
+.app-content button.primary:focus {
   border-color: #00aeec;
   box-shadow: 0 0 0 2px rgba(0, 174, 236, 0.2);
 }
 
-button.secondary,
-button.compact-icon {
+.app-content button.secondary,
+.app-content button.compact-icon {
   background-color: #fff2f6;
   color: #18191c;
   border-color: #f2dfe6;
   box-shadow: none;
 }
 
-button.secondary:hover,
-button.compact-icon:hover {
+.app-content button.secondary:hover,
+.app-content button.compact-icon:hover {
   background-color: #ffe8ef;
   border-color: #dfcbd2;
 }
 
-button.compact-icon {
+.app-content button.compact-icon {
   min-width: 22px;
   min-height: 22px;
   padding: 4px;
   border-radius: 8px;
 }
 
-button.sidebar-button {
+.app-content button.sidebar-button {
   padding: 7px 10px;
   background-color: transparent;
   background-image: none;
@@ -162,17 +166,17 @@ button.sidebar-button {
   box-shadow: none;
 }
 
-button.sidebar-button:hover {
+.app-content button.sidebar-button:hover {
   background-color: rgba(251, 114, 153, 0.09);
 }
 
-button.sidebar-button:active,
-button.sidebar-button:checked {
+.app-content button.sidebar-button:active,
+.app-content button.sidebar-button:checked {
   background-color: rgba(251, 114, 153, 0.1);
   color: #fb7299;
 }
 
-button.sidebar-button:focus {
+.app-content button.sidebar-button:focus {
   border: none;
   box-shadow: 0 0 0 2px rgba(0, 174, 236, 0.18);
 }
@@ -249,7 +253,7 @@ entry image {
   border-radius: 8px;
 }
 
-button.discovery-button {
+.app-content button.discovery-button {
   background: transparent;
   border: 1px solid transparent;
   box-shadow: none;
@@ -257,11 +261,11 @@ button.discovery-button {
   border-radius: 8px;
 }
 
-button.discovery-button:hover {
+.app-content button.discovery-button:hover {
   background-color: #f5f5f7;
 }
 
-button.discovery-button:focus-visible {
+.app-content button.discovery-button:focus-visible {
   border-color: #00aeec;
 }
 
@@ -396,7 +400,7 @@ columnview.tracks row:selected .muted {
   border-radius: 10px;
 }
 
-button.transport {
+.app-content button.transport {
   min-width: 24px;
   min-height: 24px;
   padding: 5px;
@@ -409,19 +413,19 @@ button.transport {
   font-size: 21px;
 }
 
-button.transport:hover {
+.app-content button.transport:hover {
   background-color: #fff2f6;
 }
 
-button.transport:active {
+.app-content button.transport:active {
   background-color: #ffe8ef;
 }
 
-button.transport:focus {
+.app-content button.transport:focus {
   box-shadow: 0 0 0 2px rgba(0, 174, 236, 0.2);
 }
 
-button.play {
+.app-content button.play {
   min-width: 30px;
   min-height: 30px;
   padding: 5px;
@@ -434,20 +438,20 @@ button.play {
   font-size: 18px;
 }
 
-button.play:hover {
+.app-content button.play:hover {
   background-color: #f25d8b;
 }
 
-button.play:active {
+.app-content button.play:active {
   background-color: #e75f87;
   box-shadow: none;
 }
 
-button.play:focus {
+.app-content button.play:focus {
   box-shadow: 0 0 0 3px rgba(0, 174, 236, 0.2);
 }
 
-button.small {
+.app-content button.small {
   min-height: 0;
   padding: 5px 8px;
   background-color: #fff2f6;
@@ -458,7 +462,7 @@ button.small {
   font-size: 10px;
 }
 
-button.small:hover {
+.app-content button.small:hover {
   background-color: #ffe8ef;
   color: #18191c;
 }
@@ -533,21 +537,6 @@ scale:disabled slider {
   background-color: transparent;
   background-image: none;
   border: none;
-  box-shadow: none;
-}
-
-headerbar {
-  min-height: 42px;
-  background-color: rgba(255, 249, 251, 0.98);
-  background-image: none;
-  color: #18191c;
-  border: none;
-  border-bottom: 1px solid #f2dfe6;
-  box-shadow: none;
-  text-shadow: none;
-}
-
-headerbar button {
   box-shadow: none;
 }
 
@@ -651,12 +640,6 @@ tooltip {
   font-size: 11px;
 }
 
-.dialog,
-window.dialog {
-  background-color: #fff9fb;
-  color: #18191c;
-}
-
 scrollbar {
   background-color: transparent;
   border: none;
@@ -679,23 +662,5 @@ scrollbar slider:hover {
   color: #9499a0;
 }
 
-/* Keep the titlebar and rows compact on small Linux windows. */
-headerbar windowcontrols button { min-width: 18px; min-height: 18px; padding: 4px; margin: 4px; border: none; border-radius: 7px; background: transparent; }
-headerbar windowcontrols button:hover { background-color: #ffe8ef; }
 columnview.tracks cell { padding: 0 4px; }
-button.account-card { background-color: #ffffff; border: 1px solid #f2dfe6; padding: 11px; }
-.window-title { color: #61666d; font-size: 12px; font-weight: 500; }
-
-/* Compact controls anchored to the window corner, above the search area. */
-.corner-window-controls button {
-  min-width: 24px;
-  min-height: 24px;
-  padding: 3px;
-  margin: 0 1px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  box-shadow: none;
-}
-.corner-window-controls button:hover { background-color: #ffe8ef; }
-.corner-window-controls button.close:hover { background-color: #fb7299; color: #ffffff; }
+.app-content button.account-card { background-color: #ffffff; border: 1px solid #f2dfe6; padding: 11px; }

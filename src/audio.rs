@@ -192,9 +192,13 @@ impl AudioPlayer {
     }
 
     pub fn position(&self) -> u64 {
+        self.position_ms().unwrap_or_default() / 1_000
+    }
+
+    pub fn position_ms(&self) -> Option<u64> {
         self.playbin
             .query_position::<gst::ClockTime>()
-            .map_or(0, gst::ClockTime::seconds)
+            .map(gst::ClockTime::mseconds)
     }
 
     pub fn duration(&self) -> u64 {

@@ -17,6 +17,7 @@ impl Discovery {
         body.set_margin_bottom(88);
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
+            .overlay_scrolling(false)
             .vexpand(true)
             .child(&body)
             .build();
