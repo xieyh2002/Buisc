@@ -599,12 +599,8 @@ impl Ui {
                 });
         }
         clicked!(play_all, |ui: Rc<Self>| ui.play_all());
-        clicked!(
-            play_selected,
-            |ui: Rc<Self>| if let Some(t) = ui.selected() {
-                ui.play_track(t);
-            }
-        );
+        clicked!(play_selected, |ui: Rc<Self>| ui
+            .play_list_row(ui.selection.selected() as usize));
         clicked!(favorite, |ui: Rc<Self>| if let Some(t) = ui.selected() {
             ui.favorite(&t);
         });
@@ -670,10 +666,7 @@ impl Ui {
             let weak = Rc::downgrade(&ui);
             table.connect_activate(move |_, index| {
                 if let Some(ui) = weak.upgrade() {
-                    let track = ui.shown.borrow().get(index as usize).cloned();
-                    if let Some(track) = track {
-                        ui.play_track(track);
-                    }
+                    ui.play_list_row(index as usize);
                 }
             });
         }
@@ -1290,14 +1283,32 @@ impl Ui {
             let _ = tx.send_blocking(Event::Stream(generation, Box::new(track), result));
         });
     }
-    fn play_all(self: &Rc<Self>) {
-        let tracks = self.shown.borrow().clone();
-        if let Some(first) = tracks.first() {
-            self.lib.borrow_mut().queue = tracks.clone();
+    fn uses_list_as_queue(&self) -> bool {
+        matches!(
+            *self.route.borrow(),
+            Route::Favorites | Route::Downloads | Route::Playlist(_) | Route::RemoteFolder(..)
+        )
+    }
+    fn play_list_row(self: &Rc<Self>, index: usize) {
+        self.play_from_list(index, self.uses_list_as_queue());
+    }
+    fn play_from_list(self: &Rc<Self>, index: usize, replace_queue: bool) {
+        let shown = self.shown.borrow();
+        let Some(track) = shown.get(index).cloned() else {
+            return;
+        };
+        if replace_queue {
+            self.lib.borrow_mut().queue.clone_from(&shown);
             self.schedule_save();
-            self.play_track(first.clone());
-        } else {
+        }
+        drop(shown);
+        self.play_track(track);
+    }
+    fn play_all(self: &Rc<Self>) {
+        if self.shown.borrow().is_empty() {
             self.status.set_text("列表里还没有曲目。");
+        } else {
+            self.play_from_list(0, true);
         }
     }
     pub fn toggle(self: &Rc<Self>) {
@@ -1307,6 +1318,13 @@ impl Ui {
                 self.play_track(track);
             } else if let Some(a) = self.audio.borrow().as_ref() {
                 a.toggle();
+            }
+        } else if self.uses_list_as_queue() {
+            let selected = self.selection.selected();
+            if selected == gtk::INVALID_LIST_POSITION {
+                self.play_all();
+            } else {
+                self.play_list_row(selected as usize);
             }
         } else {
             let track = self
@@ -1975,18 +1993,55 @@ mod integration_tests {
             duration: 10,
             ..Default::default()
         };
-
+        let second_path = ui.path.with_file_name("下载测试 静音 2.wav");
+        write_silent_wav(&second_path, 10);
+        let second_track = Track {
+            id: "BV1xx411c7mD".into(),
+            bvid: "BV1xx411c7mD".into(),
+            title: "第二首已下载的测试音频".into(),
+            ..track.clone()
+        };
         ui.handle(Event::Download(
             Box::new(track.clone()),
             path.clone(),
             Ok(()),
         ));
+        ui.handle(Event::Download(
+            Box::new(second_track.clone()),
+            second_path,
+            Ok(()),
+        ));
         let saved = storage::load_downloads(&ui.path.with_file_name("downloads.json")).unwrap();
         assert_eq!(saved.path_for(&track.bvid), Some(path.as_path()));
-        ui.navigate(Route::Downloads);
-        assert_eq!(*ui.shown.borrow(), vec![track.clone()]);
+        let tracks = vec![track.clone(), second_track.clone()];
+        let old_track = Track {
+            id: "BV1Q541167Qg".into(),
+            bvid: "BV1Q541167Qg".into(),
+            ..Default::default()
+        };
+        ui.lib.borrow_mut().favorites = tracks.clone();
+        ui.lib.borrow_mut().mode = storage::PlayMode::RepeatAll;
         ui.set_volume(0.);
-        ui.play_all();
+        let table = find_widget(ui.window.upcast_ref(), &|widget| {
+            widget.is::<gtk::ColumnView>()
+        })
+        .and_downcast::<gtk::ColumnView>()
+        .unwrap();
+        for route in [Route::Favorites, Route::Downloads] {
+            ui.lib.borrow_mut().queue = vec![old_track.clone(), second_track.clone()];
+            ui.navigate(route);
+            assert_eq!(*ui.shown.borrow(), tracks);
+            table.emit_by_name::<()>("activate", &[&1u32]);
+            assert_eq!(*ui.lib.borrow().queue, tracks);
+            assert_eq!(ui.current_track(), Some(second_track.clone()));
+            ui.navigate(Route::Search);
+            ui.audio_event(AudioEvent::Ended);
+            assert_eq!(ui.current_track(), Some(track.clone()));
+            ui.audio_event(AudioEvent::Ended);
+            assert_eq!(ui.current_track(), Some(second_track.clone()));
+            ui.previous();
+            assert_eq!(ui.current_track(), Some(track.clone()));
+        }
         wait_until(5, || ui.playing() && ui.position() >= 1);
         assert!(ui.playing_local.get());
         assert!(!ui.stream_inflight.get());
