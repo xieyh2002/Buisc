@@ -167,9 +167,11 @@ pub(super) fn set_play(button: &gtk::Button, playing: bool) {
     button.set_tooltip_text(Some(if playing { "暂停" } else { "播放" }));
 }
 thread_local! {
-    // Rasterized from the same SVG as the desktop and tray icons.
+    // Rasterized from the same app icon as the desktop and tray icons.
     static LOGO: gtk::gdk_pixbuf::Pixbuf = gtk::gdk_pixbuf::Pixbuf::from_read(
-        std::io::Cursor::new(include_bytes!("../../assets/buisc-logo.png"))
+        std::io::Cursor::new(include_bytes!(
+            "../../assets/icons/hicolor/512x512/apps/io.github.bilimusic.Linux.png"
+        ))
     ).expect("embedded Buisc icon");
 }
 

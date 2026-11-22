@@ -107,14 +107,17 @@ package_deb() {
         "$package_root/DEBIAN" \
         "$package_root/usr/bin" \
         "$package_root/usr/share/applications" \
-        "$package_root/usr/share/doc/$package_name" \
-        "$package_root/usr/share/icons/hicolor/scalable/apps"
+        "$package_root/usr/share/doc/$package_name"
 
     install -m0755 -- "$binary" "$package_root/usr/bin/buisc"
     install -m0644 -- "$project_root/packaging/desktop/io.github.bilimusic.Linux.desktop" \
         "$package_root/usr/share/applications/io.github.bilimusic.Linux.desktop"
-    install -m0644 -- "$project_root/assets/io.github.bilimusic.Linux.svg" \
-        "$package_root/usr/share/icons/hicolor/scalable/apps/io.github.bilimusic.Linux.svg"
+    local icon_source="$project_root/assets/icons/hicolor/512x512/apps/io.github.bilimusic.Linux.png"
+    for size in 16 22 24 32 48 64 128 256 512; do
+        install -d "$package_root/usr/share/icons/hicolor/${size}x${size}/apps"
+        install -m0644 -- "$icon_source" \
+            "$package_root/usr/share/icons/hicolor/${size}x${size}/apps/io.github.bilimusic.Linux.png"
+    done
     install -m0644 -- "$project_root/LICENSE" \
         "$package_root/usr/share/doc/$package_name/copyright"
 
@@ -237,7 +240,8 @@ esac
 [[ -r "$project_root/packaging/rpm/buisc.spec.in" ]] || fail "缺少 RPM spec 模板"
 [[ -r "$project_root/packaging/desktop/io.github.bilimusic.Linux.desktop" ]] \
     || fail "缺少桌面入口"
-[[ -r "$project_root/assets/io.github.bilimusic.Linux.svg" ]] || fail "缺少图标资源"
+[[ -r "$project_root/assets/icons/hicolor/512x512/apps/io.github.bilimusic.Linux.png" ]] \
+    || fail "缺少图标资源"
 
 case "$format" in
     deb) command -v dpkg-deb >/dev/null 2>&1 || fail "需要 dpkg-deb" ;;

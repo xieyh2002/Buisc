@@ -31,8 +31,12 @@ Bilibili audio.
 install -Dpm0755 "%{_buisc_binary}" "%{buildroot}%{_bindir}/buisc"
 install -Dpm0644 "%{_buisc_source_root}/packaging/desktop/io.github.bilimusic.Linux.desktop" \
     "%{buildroot}%{_datadir}/applications/io.github.bilimusic.Linux.desktop"
-install -Dpm0644 "%{_buisc_source_root}/assets/io.github.bilimusic.Linux.svg" \
-    "%{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.github.bilimusic.Linux.svg"
+icon_source="%{_buisc_source_root}/assets/icons/hicolor/512x512/apps/io.github.bilimusic.Linux.png"
+for size in 16 22 24 32 48 64 128 256 512; do
+    install -Dpm0644 \
+        "$icon_source" \
+        "%{buildroot}%{_datadir}/icons/hicolor/${size}x${size}/apps/io.github.bilimusic.Linux.png"
+done
 install -Dpm0644 "%{_buisc_source_root}/LICENSE" \
     "%{buildroot}%{_licensedir}/buisc/LICENSE"
 
@@ -40,5 +44,5 @@ install -Dpm0644 "%{_buisc_source_root}/LICENSE" \
 %defattr(-,root,root,-)
 %attr(0755,root,root) %{_bindir}/buisc
 %{_datadir}/applications/io.github.bilimusic.Linux.desktop
-%{_datadir}/icons/hicolor/scalable/apps/io.github.bilimusic.Linux.svg
+%{_datadir}/icons/hicolor/*/apps/io.github.bilimusic.Linux.png
 %license %{_licensedir}/buisc/LICENSE
