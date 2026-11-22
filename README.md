@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/buisc-logo.png" width="112" height="112" alt="Buisc 粉蓝小电视图标">
+  <img src="assets/buisc-logo.png?v=2" width="112" height="112" alt="Buisc 蓝白小电视耳机图标">
   <h1>Buisc</h1>
   <p><strong>把哔哩哔哩当作你的曲库。</strong><br>轻量原生 Linux 音乐播放器，免登录在线听，也支持扫码同步收藏和播放记录。</p>
 
