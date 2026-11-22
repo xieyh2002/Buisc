@@ -663,7 +663,7 @@ fn music_search_keyword(query: &str) -> String {
     }
 }
 
-fn cover_thumbnail_url(value: &str, wide: bool) -> Result<Url, String> {
+fn cover_url(value: &str, size: &str) -> Result<Url, String> {
     let mut url = Url::parse(&normalize_cover(value)).map_err(|_| "封面地址无效")?;
     let host = url.host_str().unwrap_or_default();
     if url.scheme() != "https"
@@ -675,11 +675,18 @@ fn cover_thumbnail_url(value: &str, wide: bool) -> Result<Url, String> {
         return Err("封面地址无效".into());
     }
     let original = url.path().split('@').next().unwrap_or_default();
-    let size = if wide { "480w_270h" } else { "160w_160h" };
     url.set_path(&format!("{original}@{size}_1c.jpg"));
     url.set_query(None);
     url.set_fragment(None);
     Ok(url)
+}
+
+fn cover_thumbnail_url(value: &str, wide: bool) -> Result<Url, String> {
+    cover_url(value, if wide { "480w_270h" } else { "160w_160h" })
+}
+
+fn immersive_cover_url(value: &str) -> Result<Url, String> {
+    cover_url(value, "640w_640h")
 }
 
 fn clean_html_text(value: &str) -> String {
@@ -824,12 +831,15 @@ impl BiliClient {
         self.account = Some(account);
     }
 
-    pub fn cover_thumbnail(&self, source: &str) -> Result<Vec<u8>, String> {
-        self.cover_image(source, false)
+    pub fn immersive_cover(&self, source: &str) -> Result<Vec<u8>, String> {
+        self.cover_bytes(immersive_cover_url(source)?)
     }
 
     pub fn cover_image(&self, source: &str, wide: bool) -> Result<Vec<u8>, String> {
-        let url = cover_thumbnail_url(source, wide)?;
+        self.cover_bytes(cover_thumbnail_url(source, wide)?)
+    }
+
+    fn cover_bytes(&self, url: Url) -> Result<Vec<u8>, String> {
         // Public CDN only: no account cookies, disk cache or full-resolution images.
         let response = self
             .client
@@ -1906,6 +1916,12 @@ mod cover_tests {
                 .unwrap()
                 .as_str(),
             "https://i0.hdslb.com/bfs/archive/a.jpg@160w_160h_1c.jpg"
+        );
+        assert_eq!(
+            immersive_cover_url("//i0.hdslb.com/bfs/archive/a.jpg@640w.jpg?x=1")
+                .unwrap()
+                .as_str(),
+            "https://i0.hdslb.com/bfs/archive/a.jpg@640w_640h_1c.jpg"
         );
         for source in [
             "https://hdslb.com.evil.test/a.jpg",

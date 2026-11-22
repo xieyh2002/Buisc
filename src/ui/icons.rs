@@ -15,6 +15,7 @@ pub(super) enum Icon {
     Cloud,
     Settings,
     Plus,
+    ChevronDown,
 }
 fn line(cr: &cairo::Context, points: &[(f64, f64)]) {
     if let Some(&(x, y)) = points.first() {
@@ -129,6 +130,9 @@ fn paint(cr: &cairo::Context, icon: Icon) {
             line(cr, &[(12., 5.), (12., 19.)]);
             line(cr, &[(5., 12.), (19., 12.)]);
         }
+        Icon::ChevronDown => {
+            line(cr, &[(6., 9.), (12., 15.), (18., 9.)]);
+        }
     }
 }
 pub(super) fn widget(icon: Icon, size: i32, pink: bool) -> gtk::DrawingArea {
@@ -152,6 +156,21 @@ pub(super) fn widget(icon: Icon, size: i32, pink: bool) -> gtk::DrawingArea {
         } else {
             cr.set_source_rgb(0.30, 0.30, 0.32);
         }
+        paint(cr, icon);
+    });
+    drawing
+}
+pub(super) fn light(icon: Icon, size: i32) -> gtk::DrawingArea {
+    let drawing = gtk::DrawingArea::new();
+    drawing.set_content_width(size);
+    drawing.set_content_height(size);
+    drawing.set_halign(gtk::Align::Center);
+    drawing.set_valign(gtk::Align::Center);
+    drawing.set_draw_func(move |_, cr, w, h| {
+        cr.translate((w - h.min(w)) as f64 / 2., (h - h.min(w)) as f64 / 2.);
+        let scale = w.min(h) as f64 / 24.;
+        cr.scale(scale, scale);
+        cr.set_source_rgba(1., 1., 1., 0.94);
         paint(cr, icon);
     });
     drawing

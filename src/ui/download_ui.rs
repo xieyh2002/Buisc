@@ -21,6 +21,10 @@ fn audio_filename(title: &str) -> String {
 
 impl Ui {
     pub(super) fn download_audio(self: &Rc<Self>) {
+        self.download_current();
+    }
+
+    pub(super) fn download_current(self: &Rc<Self>) {
         if self.downloading.get() {
             return;
         }

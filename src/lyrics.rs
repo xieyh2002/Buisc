@@ -10,13 +10,17 @@ pub struct Lyrics {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct LyricSegment {
+pub(crate) struct LyricSegment {
     start_ms: u64,
     end_ms: u64,
     text: Arc<str>,
 }
 
 impl Lyrics {
+    pub(crate) fn segments(&self) -> &[LyricSegment] {
+        &self.segments
+    }
+
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty()
     }
@@ -30,6 +34,22 @@ impl Lyrics {
         (position_ms < segment.end_ms).then_some(segment.text.as_ref())
     }
 
+    pub fn active_index(&self, position_ms: u64) -> Option<usize> {
+        let index = self
+            .segments
+            .partition_point(|segment| segment.start_ms <= position_ms)
+            .checked_sub(1)?;
+        (position_ms < self.segments[index].end_ms).then_some(index)
+    }
+}
+
+impl LyricSegment {
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+}
+
+impl Lyrics {
     pub(crate) fn from_json(bytes: &[u8]) -> Result<Self, String> {
         let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
         let payload: Value =
@@ -251,5 +271,22 @@ mod tests {
     fn lyrics_are_send() {
         fn assert_send<T: Send>() {}
         assert_send::<Lyrics>();
+    }
+
+    #[test]
+    fn active_index_tracks_lyric_boundaries() {
+        let lyrics = Lyrics::from_json(
+            br#"{"body":[
+                {"from":0,"to":1,"content":"one"},
+                {"from":1,"to":2,"content":"two"}
+            ]}"#,
+        )
+        .expect("parse lyrics");
+        assert_eq!(lyrics.segments().len(), 2);
+        assert_eq!(lyrics.segments()[1].text(), "two");
+        assert_eq!(lyrics.active_index(0), Some(0));
+        assert_eq!(lyrics.active_index(999), Some(0));
+        assert_eq!(lyrics.active_index(1_000), Some(1));
+        assert_eq!(lyrics.active_index(2_000), None);
     }
 }

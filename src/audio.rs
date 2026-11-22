@@ -3,7 +3,7 @@ use std::fs::File;
 use std::path::Path;
 use std::rc::Rc;
 
-use gst::glib::{ControlFlow, FlagsClass};
+use gst::glib::{self, ControlFlow, FlagsClass};
 use gst::prelude::*;
 use gstreamer as gst;
 
@@ -13,18 +13,48 @@ const BUFFER_SIZE: i32 = 2 * 1024 * 1024;
 const HTTP_TIMEOUT_SECONDS: u32 = 15;
 const REFERER: &str = "https://www.bilibili.com/";
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum AudioEvent {
     Ended,
     Error(String),
     Playing(bool),
     Duration(u64),
+    Spectrum(Vec<f32>),
 }
 
 pub struct AudioPlayer {
     playbin: gst::Element,
+    _spectrum: Option<gst::Element>,
     desired_playing: Rc<Cell<bool>>,
     _bus_watch: Option<gst::bus::BusWatchGuard>,
+}
+
+const SPECTRUM_BANDS: u32 = 72;
+
+fn spectrum_levels(structure: &gst::StructureRef) -> Option<Vec<f32>> {
+    let magnitude = structure.get::<glib::Value>("magnitude").ok()?;
+    let decibels: Vec<f32> = magnitude
+        .get::<gst::ListRef<'_>>()
+        .map(|values| values.as_slice().to_vec())
+        .unwrap_or_else(|_| {
+            magnitude
+                .get::<gst::ArrayRef<'_>>()
+                .map(|values| values.as_slice().to_vec())
+                .unwrap_or_default()
+        })
+        .iter()
+        .filter_map(|value| value.get::<f32>().ok())
+        .collect();
+    if decibels.is_empty() {
+        return None;
+    }
+    let peak = decibels.iter().copied().fold(f32::MIN, f32::max);
+    Some(
+        decibels
+            .into_iter()
+            .map(|value| ((value + 60.).max(0.) / (peak + 60.).max(12.)).sqrt())
+            .collect(),
+    )
 }
 
 impl AudioPlayer {
@@ -39,8 +69,22 @@ impl AudioPlayer {
         configure_audio_only(&playbin)?;
         configure_http_headers(&playbin);
 
+        let spectrum = gst::ElementFactory::make("spectrum")
+            .name("buisc-spectrum")
+            .property("bands", SPECTRUM_BANDS)
+            .property("interval", 20_000_000u64)
+            .property("post-messages", true)
+            .property("message-magnitude", true)
+            .property("threshold", -60i32)
+            .build()
+            .ok();
+        if let Some(spectrum) = spectrum.as_ref() {
+            playbin.set_property("audio-filter", spectrum);
+        }
+
         let desired_playing = Rc::new(Cell::new(false));
         let bus_desired_playing = Rc::clone(&desired_playing);
+        let spectrum_name = spectrum.as_ref().map(|element| element.name());
         let bus = playbin
             .bus()
             .ok_or_else(|| "GStreamer playbin 没有消息总线".to_string())?;
@@ -91,6 +135,23 @@ impl AudioPlayer {
                             .map_or(0, gst::ClockTime::seconds);
                         on_event(AudioEvent::Duration(duration));
                     }
+                    gst::MessageView::Element(element)
+                        if element
+                            .structure()
+                            .is_some_and(|structure| structure.name() == "spectrum") =>
+                    {
+                        let source_matches = spectrum_name.as_ref().is_none_or(|name| {
+                            message
+                                .src()
+                                .map(|source| source.name() == *name)
+                                .unwrap_or(false)
+                        });
+                        if source_matches
+                            && let Some(levels) = element.structure().and_then(spectrum_levels)
+                        {
+                            on_event(AudioEvent::Spectrum(levels));
+                        }
+                    }
                     _ => {}
                 }
                 ControlFlow::Continue
@@ -99,6 +160,7 @@ impl AudioPlayer {
 
         Ok(Self {
             playbin,
+            _spectrum: spectrum,
             desired_playing,
             _bus_watch: Some(bus_watch),
         })
@@ -393,6 +455,64 @@ fn data_uri(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::Duration;
+
+    fn write_tone_wav(path: &Path) {
+        const SAMPLE_RATE: u32 = 44_100;
+        const SAMPLES: usize = SAMPLE_RATE as usize * 4;
+        let data_size = SAMPLES * 2;
+        let mut wav = Vec::with_capacity(44 + data_size);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_size as u32).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
+        wav.extend_from_slice(&(SAMPLE_RATE * 2).to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&(data_size as u32).to_le_bytes());
+        for sample in 0..SAMPLES {
+            let value =
+                (sample as f32 * 220. * std::f32::consts::TAU / SAMPLE_RATE as f32).sin() * 12_000.;
+            wav.extend_from_slice(&(value as i16).to_le_bytes());
+        }
+        std::fs::write(path, wav).unwrap();
+    }
+
+    #[test]
+    fn player_emits_spectrum_events_while_playing() {
+        gst::init().unwrap();
+        let path = std::env::temp_dir().join(format!("buisc-spectrum-{}.wav", std::process::id()));
+        write_tone_wav(&path);
+
+        let context = glib::MainContext::default();
+        let loop_ = glib::MainLoop::new(Some(&context), false);
+        let count = Rc::new(Cell::new(0));
+        let event_count = Rc::clone(&count);
+        let event_loop = loop_.clone();
+        let player = AudioPlayer::new(move |event| {
+            if matches!(event, AudioEvent::Spectrum(_)) {
+                event_count.set(event_count.get() + 1);
+                if event_count.get() >= 3 {
+                    event_loop.quit();
+                }
+            }
+        })
+        .unwrap();
+        player.load_test_file(&path).unwrap();
+
+        let timeout_loop = loop_.clone();
+        glib::timeout_add_local_once(Duration::from_secs(5), move || timeout_loop.quit());
+        loop_.run();
+        player.stop();
+        let _ = std::fs::remove_file(path);
+        assert!(count.get() >= 3, "只收到 {} 条频谱消息", count.get());
+    }
 
     #[test]
     fn playbin_is_audio_only_and_volume_is_bounded() {
@@ -411,6 +531,19 @@ mod tests {
         assert!(!flags_class.is_set_by_nick(&flags, "download"));
         assert_eq!(playbin.property::<i32>("buffer-size"), BUFFER_SIZE);
 
+        let spectrum = gst::ElementFactory::make("spectrum")
+            .property("bands", SPECTRUM_BANDS)
+            .property("post-messages", true)
+            .property("message-magnitude", true)
+            .property("threshold", -60i32)
+            .build()
+            .unwrap();
+        playbin.set_property("audio-filter", &spectrum);
+        assert_eq!(
+            playbin.property::<gst::Element>("audio-filter").name(),
+            spectrum.name()
+        );
+
         let player = AudioPlayer::new(|_| {}).unwrap();
         player.set_volume(-1.0);
         assert_eq!(player.playbin.property::<f64>("volume"), 0.0);
@@ -418,6 +551,15 @@ mod tests {
         assert_eq!(player.playbin.property::<f64>("volume"), 1.0);
         player.set_volume(0.42);
         assert!((player.playbin.property::<f64>("volume") - 0.42).abs() < f64::EPSILON);
+
+        let structure = gst::Structure::builder("spectrum")
+            .field("magnitude", gst::Array::new([-60f32, -36f32, -12f32]))
+            .build();
+        let levels = spectrum_levels(&structure).expect("spectrum levels");
+        assert_eq!(levels.len(), 3);
+        assert!(levels[0] < 0.01);
+        assert!((levels[1] - 2_f32.sqrt() / 2.).abs() < 1e-5);
+        assert!((levels[2] - 1.).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -3,6 +3,7 @@ mod discover;
 mod download_ui;
 mod glass;
 mod icons;
+mod now_playing;
 mod smooth_scroll;
 mod subtitle_lyrics;
 use crate::{
@@ -43,6 +44,7 @@ enum Event {
 
 pub struct Ui {
     pub window: gtk::ApplicationWindow,
+    window_overlay: gtk::Overlay,
     api: BiliClient,
     account: crate::account::AccountClient,
     account_button: gtk::Button,
@@ -56,6 +58,7 @@ pub struct Ui {
     playing_local: Cell<bool>,
     route: RefCell<Route>,
     current: RefCell<Option<Track>>,
+    current_quality: Cell<Option<&'static str>>,
     shown: RefCell<Vec<Track>>,
     store: gio::ListStore,
     selection: gtk::SingleSelection,
@@ -79,6 +82,7 @@ pub struct Ui {
     lyrics_timer: RefCell<Option<glib::SourceId>>,
     cover_stack: gtk::Stack,
     cover_picture: gtk::Picture,
+    backdrop_texture: RefCell<Option<gtk::gdk::Texture>>,
     favorite_button: gtk::Button,
     download_button: gtk::Button,
     downloading: Cell<bool>,
@@ -109,6 +113,7 @@ pub struct Ui {
     background_hold: RefCell<Option<gio::ApplicationHoldGuard>>,
     quitting: Cell<bool>,
     settings_window: RefCell<Option<gtk::Window>>,
+    now_playing: RefCell<Option<now_playing::NowPlaying>>,
 }
 fn label(text: &str, class: &str) -> gtk::Label {
     let l = gtk::Label::new(Some(text));
@@ -133,6 +138,17 @@ fn margins(w: &impl IsA<gtk::Widget>, n: i32) {
 }
 pub fn time_label(seconds: u64) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+fn audio_quality(bandwidth: u64, codecs: &str) -> &'static str {
+    let codecs = codecs.to_ascii_lowercase();
+    if codecs.contains("flac") || codecs.contains("alac") {
+        "无损"
+    } else if bandwidth >= 192_000 {
+        "高音质"
+    } else {
+        "标准音质"
+    }
 }
 
 impl Ui {
@@ -171,7 +187,6 @@ impl Ui {
         root.add_css_class("app-content");
         let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         body.set_vexpand(true);
-        root.append(&body);
         let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 6);
         sidebar.set_width_request(210);
         sidebar.set_hexpand(false);
@@ -243,6 +258,9 @@ impl Ui {
         settings.set_child(Some(&settings_row));
         margins(&settings, 18);
         sidebar.append(&settings);
+        let player_clearance = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        player_clearance.set_height_request(64);
+        sidebar.append(&player_clearance);
         body.append(&sidebar);
         let main = gtk::Box::new(gtk::Orientation::Vertical, 0);
         main.set_widget_name("main-pane");
@@ -250,6 +268,7 @@ impl Ui {
         let main_overlay = gtk::Overlay::new();
         main_overlay.set_hexpand(true);
         main_overlay.set_child(Some(&main));
+        body.append(&main_overlay);
         let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
         content.set_vexpand(true);
         margins(&content, 30);
@@ -372,11 +391,12 @@ impl Ui {
         foot.append(&status);
         content.append(&foot);
         let player = gtk::Box::new(gtk::Orientation::Horizontal, 14);
-        player.set_halign(gtk::Align::Center);
+        player.set_halign(gtk::Align::Fill);
+        player.set_hexpand(true);
         player.set_valign(gtk::Align::End);
-        player.set_margin_bottom(26);
-        player.set_margin_start(12);
-        player.set_margin_end(12);
+        player.set_margin_bottom(0);
+        player.set_margin_start(0);
+        player.set_margin_end(0);
         player.set_widget_name("player-bar");
         player.add_css_class("player");
         let identity = gtk::Box::new(gtk::Orientation::Horizontal, 9);
@@ -408,6 +428,7 @@ impl Ui {
         player.append(&identity);
 
         let center = gtk::Box::new(gtk::Orientation::Vertical, 3);
+        center.set_hexpand(true);
         let upper = gtk::Box::new(gtk::Orientation::Horizontal, 10);
         let transport = gtk::Box::new(gtk::Orientation::Horizontal, 3);
         transport.add_css_class("transport-group");
@@ -435,6 +456,10 @@ impl Ui {
         let favorite_button = button("", "transport");
         favorite_button.set_child(Some(&icons::widget(Icon::Heart, 18, false)));
         favorite_button.set_tooltip_text(Some("收藏当前歌曲到本机；同步到账号请用「B站收藏」"));
+        let now_playing_button = button("", "transport");
+        now_playing_button.set_child(Some(&icons::widget(Icon::Queue, 18, false)));
+        now_playing_button.set_tooltip_text(Some("打开沉浸播放页"));
+        now_playing_button.set_widget_name("now-playing-button");
         let download_button = button("", "transport");
         download_button.set_icon_name("folder-download-symbolic");
         download_button.set_tooltip_text(Some("下载当前歌曲；未播放时下载选中曲目"));
@@ -448,6 +473,7 @@ impl Ui {
         volume.set_draw_value(false);
         volume.set_tooltip_text(Some("音量"));
         actions.append(&favorite_button);
+        actions.append(&now_playing_button);
         actions.append(&download_button);
         actions.append(&mode);
         actions.append(&volume);
@@ -474,14 +500,19 @@ impl Ui {
         lyric_line.set_visible(false);
         center.append(&lyric_line);
         player.append(&center);
-        body.append(&glass::GlassPane::new(&main_overlay, &player));
-        window.set_child(Some(&root));
+        root.append(&glass::GlassPane::new(&body, &player));
+        let window_overlay = gtk::Overlay::new();
+        window_overlay.set_hexpand(true);
+        window_overlay.set_vexpand(true);
+        window_overlay.set_child(Some(&root));
+        window.set_child(Some(&window_overlay));
         let (tx, rx) = async_channel::bounded(16);
         let account = crate::account::AccountClient::new(path.with_file_name("account.json"))?;
         let mut api = BiliClient::new()?;
         api.set_account(account.clone());
         let ui = Rc::new(Self {
             window,
+            window_overlay,
             api,
             account,
             account_button,
@@ -495,6 +526,7 @@ impl Ui {
             playing_local: Cell::new(false),
             route: RefCell::new(Route::Discover),
             current: RefCell::new(None),
+            current_quality: Cell::new(None),
             shown: RefCell::new(vec![]),
             store,
             selection,
@@ -518,6 +550,7 @@ impl Ui {
             lyrics_timer: RefCell::new(None),
             cover_stack: art,
             cover_picture,
+            backdrop_texture: RefCell::new(None),
             favorite_button,
             download_button,
             downloading: Cell::new(false),
@@ -548,6 +581,7 @@ impl Ui {
             background_hold: RefCell::new(None),
             quitting: Cell::new(false),
             settings_window: RefCell::new(None),
+            now_playing: RefCell::new(None),
         });
         let weak = Rc::downgrade(&ui);
         let audio = AudioPlayer::new(move |event| {
@@ -616,6 +650,7 @@ impl Ui {
         clicked!(settings, |ui: Rc<Self>| ui.settings());
         clicked!(ui.play_button, |ui: Rc<Self>| ui.toggle());
         clicked!(ui.download_button, |ui: Rc<Self>| ui.download_audio());
+        clicked!(now_playing_button, |ui: Rc<Self>| ui.open_now_playing());
         clicked!(previous, |ui: Rc<Self>| ui.previous());
         clicked!(next, |ui: Rc<Self>| ui.next(false));
         clicked!(ui.favorite_button, |ui: Rc<Self>| {
@@ -624,6 +659,19 @@ impl Ui {
                 ui.favorite(&t);
             }
         });
+        {
+            let weak = Rc::downgrade(&ui);
+            let click = gtk::GestureClick::new();
+            click.connect_released(move |_, _, _, _| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.open_now_playing();
+                }
+            });
+            ui.cover_stack.add_controller(click);
+            ui.cover_stack.set_cursor_from_name(Some("pointer"));
+            ui.cover_stack
+                .set_tooltip_text(Some("点击封面打开沉浸播放页"));
+        }
         clicked!(ui.mode, |ui: Rc<Self>| {
             let next = ui.lib.borrow().mode.next();
             ui.mode.set_label(next.label());
@@ -800,6 +848,9 @@ impl Ui {
     }
     fn finish_shutdown(self: &Rc<Self>) {
         self.quitting.set(true);
+        if let Some(view) = self.now_playing.borrow_mut().take() {
+            view.close();
+        }
         self.download_cancel
             .store(true, std::sync::atomic::Ordering::Relaxed);
         self.close_settings();
@@ -837,6 +888,7 @@ impl Ui {
             ("next", vec!["<Primary>Right", "AudioNext"], 1),
             ("previous", vec!["<Primary>Left", "AudioPrev"], 2),
             ("search", vec!["<Primary>f"], 3),
+            ("now-playing", vec!["<Primary><Shift>p"], 4),
         ] {
             let action = gio::SimpleAction::new(name, None);
             let weak = Rc::downgrade(self);
@@ -846,9 +898,10 @@ impl Ui {
                         0 => ui.toggle(),
                         1 => ui.next(false),
                         2 => ui.previous(),
-                        _ => {
+                        3 => {
                             ui.search.grab_focus();
                         }
+                        _ => ui.open_now_playing(),
                     }
                 }
             });
@@ -1069,14 +1122,18 @@ impl Ui {
                 }
                 if let Ok(bytes) = result {
                     let loader = gtk::gdk_pixbuf::PixbufLoader::new();
-                    loader.set_size(42, 42);
                     if loader.write(&bytes).is_ok()
                         && loader.close().is_ok()
                         && let Some(pixbuf) = loader.pixbuf()
                     {
                         let texture = gtk::gdk::Texture::for_pixbuf(&pixbuf);
+                        let backdrop = now_playing::blurred_cover(&pixbuf);
                         self.cover_picture.set_paintable(Some(&texture));
                         self.cover_stack.set_visible_child_name("cover");
+                        *self.backdrop_texture.borrow_mut() = backdrop.clone();
+                        if let Some(view) = self.now_playing.borrow().as_ref() {
+                            view.set_cover(Some(texture), backdrop);
+                        }
                     }
                 }
             }
@@ -1136,6 +1193,7 @@ impl Ui {
                 }
                 match result {
                     Ok(stream) => {
+                        let quality = audio_quality(stream.bandwidth, &stream.codecs);
                         let result = self
                             .audio
                             .borrow()
@@ -1163,6 +1221,7 @@ impl Ui {
                                 track,
                                 stream.duration,
                                 Some(stream.cid),
+                                quality,
                             ),
                             Err(e) => self.status.set_text(&e),
                         }
@@ -1179,6 +1238,10 @@ impl Ui {
     fn reset_cover(&self) {
         self.cover_stack.set_visible_child_name("fallback");
         self.cover_picture.set_paintable(gtk::gdk::Paintable::NONE);
+        self.backdrop_texture.borrow_mut().take();
+        if let Some(view) = self.now_playing.borrow().as_ref() {
+            view.set_cover(None, None);
+        }
     }
     fn load_cover(&self, generation: u64, source: &str) {
         self.reset_cover();
@@ -1190,7 +1253,7 @@ impl Ui {
         let source = source.to_owned();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send_blocking(Event::Cover(generation, api.cover_thumbnail(&source)));
+            let _ = tx.send_blocking(Event::Cover(generation, api.immersive_cover(&source)));
         });
     }
     fn enqueue(self: &Rc<Self>, track: Track) {
@@ -1205,16 +1268,19 @@ impl Ui {
         drop(lib);
         self.schedule_save();
         self.status.set_text("已加入播放队列。");
+        self.sync_now_playing();
     }
     pub fn play_track(self: &Rc<Self>, track: Track) {
         self.sync_history(true);
         self.stopped.set(true);
         self.remove_timer();
         self.clear_lyrics();
+        self.current_quality.set(None);
         if let Some(a) = self.audio.borrow().as_ref() {
             a.stop();
         }
         self.enqueue(track.clone());
+        self.sync_now_playing();
         let generation = self.play_generation.get() + 1;
         self.play_generation.set(generation);
         self.pending_stream.borrow_mut().take();
@@ -1232,7 +1298,7 @@ impl Ui {
         if playing_local {
             let duration = track.duration;
             self.playing_local.set(true);
-            self.playback_started(generation, track, duration, None);
+            self.playback_started(generation, track, duration, None, "本地音频");
         } else {
             self.request_stream(generation, track);
         }
@@ -1244,8 +1310,10 @@ impl Ui {
         track: Track,
         duration: u64,
         cid: Option<u64>,
+        quality: &'static str,
     ) {
         self.stopped.set(false);
+        self.current_quality.set(Some(quality));
         self.now_title.set_text(&track.title);
         self.now_title.set_tooltip_text(Some(&track.title));
         self.now_artist.set_text(&track.artist);
@@ -1264,6 +1332,59 @@ impl Ui {
         });
         self.update_favorite();
         self.notify_mpris();
+        self.sync_now_playing();
+    }
+
+    fn current_id(&self) -> Option<String> {
+        self.current.borrow().as_ref().map(|track| track.id.clone())
+    }
+
+    fn sync_now_playing(&self) {
+        let now_playing = self.now_playing.borrow();
+        let Some(view) = now_playing.as_ref() else {
+            return;
+        };
+        view.set_track(self.current.borrow().as_ref());
+        view.set_quality(self.current_quality.get().unwrap_or("音频"));
+        view.set_mode(self.lib.borrow().mode.label());
+        view.refresh_queue(&self.lib.borrow().queue, self.current_id().as_deref());
+    }
+
+    pub(super) fn open_now_playing(self: &Rc<Self>) {
+        if self.now_playing.borrow().is_none() {
+            *self.now_playing.borrow_mut() = Some(now_playing::NowPlaying::new(self));
+        }
+        if let Some(view) = self.now_playing.borrow().as_ref() {
+            view.set_track(self.current.borrow().as_ref());
+            let cover = self
+                .cover_picture
+                .paintable()
+                .and_then(|paintable| paintable.downcast::<gtk::gdk::Texture>().ok());
+            view.set_cover(cover, self.backdrop_texture.borrow().clone());
+            view.set_quality(self.current_quality.get().unwrap_or("音频"));
+            view.set_mode(self.lib.borrow().mode.label());
+            view.set_playing(self.playing());
+            view.refresh_queue(&self.lib.borrow().queue, self.current_id().as_deref());
+            view.set_lyrics(&self.lyrics.borrow());
+            view.present();
+        }
+        self.status
+            .set_text("沉浸播放页已打开；按 Esc 返回主界面。");
+    }
+
+    pub(super) fn close_now_playing(&self) {
+        if let Some(view) = self.now_playing.borrow().as_ref() {
+            view.close();
+        }
+    }
+
+    pub(super) fn play_queue_index(self: &Rc<Self>, index: usize) {
+        let track = self.lib.borrow().queue.get(index).cloned();
+        if let Some(track) = track {
+            self.play_track(track);
+        } else {
+            self.status.set_text("这首歌已从队列中移除。");
+        }
     }
 
     fn request_stream(&self, generation: u64, track: Track) {
@@ -1476,6 +1597,9 @@ impl Ui {
             }
             AudioEvent::Playing(playing) => {
                 icons::set_play(&self.play_button, playing);
+                if let Some(view) = self.now_playing.borrow().as_ref() {
+                    view.set_playing(playing);
+                }
                 if playing {
                     self.status.set_text(if self.playing_local.get() {
                         "正在播放 · 已下载音频"
@@ -1492,6 +1616,11 @@ impl Ui {
             AudioEvent::Duration(d) => {
                 if d > 0 {
                     self.seek.set_range(0., d as f64);
+                }
+            }
+            AudioEvent::Spectrum(levels) => {
+                if let Some(view) = self.now_playing.borrow().as_ref() {
+                    view.set_spectrum(levels);
                 }
             }
         }
@@ -1518,6 +1647,7 @@ impl Ui {
                 }
                 ui.clock
                     .set_text(&format!("{} / {}", time_label(pos), time_label(duration)));
+                ui.sync_now_playing_lyrics(pos.saturating_mul(1000));
             }
             ui.sync_history(false);
             glib::ControlFlow::Continue
@@ -1699,7 +1829,7 @@ impl Ui {
         area.append(&label("Buisc", "title-2"));
         let text = label(
             &format!(
-                "Rust + GTK4 + GStreamer · v{}\n\n按需解析音频，不加载视频，不缓存音频文件。\n暂停时停止进度更新，空闲时不轮询网络。\n支持游客与扫码登录，普通 AAC；多 P 视频目前播放第一 P。\n\n快捷键：Ctrl+空格 播放/暂停 · Ctrl+←/→ 切歌\nCtrl+F 搜索 · 系统媒体面板通过 MPRIS 控制\n\n资料库：{}",
+                "Rust + GTK4 + GStreamer · v{}\n\n按需解析音频，不加载视频，不缓存音频文件。\n暂停时停止进度更新，空闲时不轮询网络。\n支持游客与扫码登录，普通 AAC；多 P 视频目前播放第一 P。\n\n快捷键：Ctrl+空格 播放/暂停 · Ctrl+←/→ 切歌\nCtrl+F 搜索 · Ctrl+Shift+P 沉浸播放\n系统媒体面板通过 MPRIS 控制\n\n资料库：{}",
                 env!("CARGO_PKG_VERSION"),
                 self.path.display()
             ),
@@ -2070,15 +2200,15 @@ mod integration_tests {
         event_loop.run();
     }
     fn snapshot(ui: &Ui, path: &str) {
-        let paintable = gtk::WidgetPaintable::new(Some(&ui.window));
+        let window: gtk::Window = ui.window.clone().upcast();
+        snapshot_window(&window, path);
+    }
+    fn snapshot_window(window: &gtk::Window, path: &str) {
+        let paintable = gtk::WidgetPaintable::new(Some(window));
         let snapshot = gtk::Snapshot::new();
-        paintable.snapshot(
-            &snapshot,
-            ui.window.width() as f64,
-            ui.window.height() as f64,
-        );
+        paintable.snapshot(&snapshot, window.width() as f64, window.height() as f64);
         let node = snapshot.to_node().expect("render node");
-        let renderer = ui.window.renderer().expect("renderer");
+        let renderer = window.renderer().expect("renderer");
         renderer
             .render_texture(&node, None)
             .save_to_png(path)
@@ -2523,10 +2653,9 @@ mod integration_tests {
         ui.clone().start();
         wait_until(30, || !ui.loading.get());
         pump(4);
-        snapshot(
-            &ui,
-            &std::env::var("BILI_MUSIC_SCREENSHOT").expect("screenshot output path"),
-        );
+        let screenshot_path =
+            std::env::var("BILI_MUSIC_SCREENSHOT").expect("screenshot output path");
+        snapshot(&ui, &screenshot_path);
         assert_eq!(ui.heading.text(), "音乐热榜");
         println!(
             "GTK renderer: {}",
@@ -2544,9 +2673,23 @@ mod integration_tests {
         .unwrap();
         let pane = player.parent().and_downcast::<glass::GlassPane>().unwrap();
         assert_eq!(player.valign(), gtk::Align::End);
-        assert_eq!(player.halign(), gtk::Align::Center);
-        assert_eq!(pane.first_child(), main.parent());
-        assert!(player.width() <= main.width());
+        assert_eq!(player.halign(), gtk::Align::Fill);
+        assert_eq!(player.margin_start(), 0);
+        assert_eq!(player.margin_end(), 0);
+        assert_eq!(
+            pane.first_child().as_ref(),
+            main.parent().and_then(|parent| parent.parent()).as_ref()
+        );
+        let sidebar = find_widget(ui.window.upcast_ref(), &|widget| {
+            widget.css_classes().iter().any(|class| class == "sidebar")
+        })
+        .unwrap();
+        let player_bounds = player.compute_bounds(&pane).unwrap();
+        assert_eq!(player_bounds.x(), 0.);
+        assert!(
+            player_bounds.width() >= (main.width() + sidebar.width() - 1) as f32,
+            "播放栏应横跨侧边栏和主内容区"
+        );
         assert!(
             find_widget(&ui.window.child().unwrap(), &|widget| {
                 widget.is::<gtk::WindowControls>() || widget.is::<gtk::WindowHandle>()
@@ -2565,7 +2708,7 @@ mod integration_tests {
         assert!(!ui.discovery.scroll.is_overlay_scrolling());
         let demo_tracks = vec![Track::default(); 21];
         ui.discovery.render(&ui, &demo_tracks);
-        pump(1);
+        pump(2);
         let scroll = &ui.discovery.scroll;
         let viewport = scroll.child().unwrap().compute_bounds(scroll).unwrap();
         let scrollbar = scroll.vscrollbar();
@@ -2607,6 +2750,61 @@ mod integration_tests {
         assert!(ui.lyric_line.text().trim().is_empty());
         ui.update_lyric(2_000);
         assert_eq!(ui.lyric_line.text(), "Second line");
+        {
+            let mut lib = ui.lib.borrow_mut();
+            lib.queue = vec![
+                Track {
+                    id: "BV1xx411c7mD".into(),
+                    bvid: "BV1xx411c7mD".into(),
+                    title: "沉浸页测试曲目".into(),
+                    artist: "Buisc".into(),
+                    ..Default::default()
+                },
+                Track {
+                    id: "BV1BDk2YCEHF".into(),
+                    bvid: "BV1BDk2YCEHF".into(),
+                    title: "第二首测试曲目".into(),
+                    artist: "Buisc".into(),
+                    ..Default::default()
+                },
+            ];
+        }
+        *ui.current.borrow_mut() = ui.lib.borrow().queue.first().cloned();
+        ui.open_now_playing();
+        pump(1);
+        {
+            let now_playing = ui.now_playing.borrow();
+            let view = now_playing.as_ref().expect("now playing window");
+            assert!(view.root.is_visible());
+            assert_eq!(view.queue_rows.borrow().len(), 2);
+            assert!(view.side.is_visible());
+            assert_eq!(
+                view.right_stack.visible_child_name().as_deref(),
+                Some("lyrics")
+            );
+            let cover_bytes = std::env::var("BILI_MUSIC_TEST_COVER")
+                .ok()
+                .and_then(|path| std::fs::read(path).ok())
+                .unwrap_or_else(|| include_bytes!("../assets/buisc-logo.png").to_vec());
+            let cover =
+                gtk::gdk_pixbuf::Pixbuf::from_read(std::io::Cursor::new(cover_bytes)).unwrap();
+            let texture = gtk::gdk::Texture::for_pixbuf(&cover);
+            let backdrop = now_playing::blurred_cover(&cover);
+            view.set_cover(Some(texture), backdrop);
+            let now_path =
+                std::path::Path::new(&screenshot_path).with_file_name("buisc-beta-now-playing.png");
+            drop(now_playing);
+            pump(1);
+            snapshot(&ui, &now_path.to_string_lossy());
+        }
+        ui.close_now_playing();
+        pump(1);
+        ui.clear_lyrics();
+        {
+            let now_playing = ui.now_playing.borrow();
+            let view = now_playing.as_ref().expect("now playing view");
+            assert!(!view.side.is_visible());
+        }
         ui.stop();
         assert!(!ui.lyric_line.is_visible());
         settings.close();

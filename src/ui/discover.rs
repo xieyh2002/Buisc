@@ -239,12 +239,13 @@ fn track_button(ui: &Rc<Ui>, track: &Track, child: &impl IsA<gtk::Widget>) -> gt
     let button = gtk::Button::new();
     button.add_css_class("discovery-button");
     button.set_child(Some(child));
-    button.set_tooltip_text(Some(&format!("播放 · {}", track.title)));
+    button.set_tooltip_text(Some(&format!("播放并打开沉浸页 · {}", track.title)));
     let track = track.clone();
     let weak = Rc::downgrade(ui);
     button.connect_clicked(move |_| {
         if let Some(ui) = weak.upgrade() {
             ui.play_track(track.clone());
+            ui.open_now_playing();
         }
     });
     button

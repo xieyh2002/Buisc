@@ -48,7 +48,7 @@ mod imp {
                         bounds.width() + 48.,
                         bounds.height() + 48.,
                     );
-                    snapshot.push_rounded_clip(&gsk::RoundedRect::from_rect(bounds, 22.));
+                    snapshot.push_rounded_clip(&gsk::RoundedRect::from_rect(bounds, 0.));
                     snapshot.push_blur(12.);
                     snapshot.push_clip(&sample);
                     snapshot.append_color(&gdk::RGBA::WHITE, &sample);

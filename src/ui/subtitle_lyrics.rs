@@ -37,6 +37,9 @@ impl Ui {
         *self.lyrics.borrow_mut() = lyrics;
         self.lyric_line.set_visible(true);
         self.update_lyric(self.lyric_position().unwrap_or_default());
+        if let Some(view) = self.now_playing.borrow().as_ref() {
+            view.set_lyrics(&self.lyrics.borrow());
+        }
         if self.playing() {
             self.ensure_lyrics_timer();
         }
@@ -49,6 +52,9 @@ impl Ui {
         self.lyric_line.set_text("");
         self.lyric_line.set_tooltip_text(None);
         self.lyric_line.set_visible(false);
+        if let Some(view) = self.now_playing.borrow().as_ref() {
+            view.clear_lyrics();
+        }
     }
 
     fn lyric_position(&self) -> Option<u64> {
@@ -64,6 +70,12 @@ impl Ui {
                 self.lyric_line.set_text(text);
                 self.lyric_line.set_tooltip_text(line);
             }
+        }
+    }
+
+    pub(super) fn sync_now_playing_lyrics(&self, position_ms: u64) {
+        if let Some(view) = self.now_playing.borrow().as_ref() {
+            view.update_active_line(&self.lyrics.borrow(), position_ms);
         }
     }
 
