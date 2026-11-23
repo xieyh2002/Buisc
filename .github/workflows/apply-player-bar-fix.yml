@@ -25,6 +25,9 @@ jobs:
             echo "Patch already applied."
             exit 0
           fi
+          if [ -n "$(tail -c 1 .github/player-bar-fix.patch)" ]; then
+            printf '\n' >> .github/player-bar-fix.patch
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git apply --whitespace=nowarn .github/player-bar-fix.patch
