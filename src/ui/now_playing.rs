@@ -129,6 +129,10 @@ pub(super) struct NowPlaying {
     active_line: Cell<Option<usize>>,
     pub(super) side: gtk::Box,
     pub(super) right_stack: gtk::Stack,
+    #[cfg(test)]
+    pub(super) art: gtk::Overlay,
+    #[cfg(test)]
+    pub(super) controls: gtk::Box,
     seek: gtk::Scale,
     position: gtk::Label,
     duration: gtk::Label,
@@ -162,11 +166,13 @@ impl NowPlaying {
         content.set_hexpand(true);
         content.set_vexpand(true);
         root.add_overlay(&content);
+        root.set_measure_overlay(&content, true);
 
         let top = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         top.add_css_class("now-playing-top");
         top.set_hexpand(true);
         top.set_halign(gtk::Align::Fill);
+        top.set_height_request(44);
         top.set_margin_top(12);
         top.set_margin_end(18);
         top.set_margin_start(18);
@@ -198,7 +204,7 @@ impl NowPlaying {
         stage.set_hexpand(true);
         stage.set_vexpand(true);
         stage.set_valign(gtk::Align::End);
-        stage.set_margin_bottom(82);
+        stage.set_margin_bottom(24);
         let hero = gtk::Box::new(gtk::Orientation::Vertical, 0);
         hero.add_css_class("now-playing-hero");
         hero.set_halign(gtk::Align::Center);
@@ -227,8 +233,9 @@ impl NowPlaying {
         art.add_css_class("now-playing-art");
         art.set_halign(gtk::Align::Center);
         art.set_valign(gtk::Align::Center);
-        art.set_margin_top(112);
+        art.set_margin_top(24);
         art.set_size_request(260, 260);
+        art.set_height_request(260);
         art.set_overflow(gtk::Overflow::Hidden);
         let fallback = icons::artwork(260);
         art.set_child(Some(&fallback));
@@ -243,11 +250,12 @@ impl NowPlaying {
 
         let controls = gtk::Box::new(gtk::Orientation::Vertical, 11);
         controls.add_css_class("now-playing-controls");
+        controls.set_width_request(480);
         controls.set_hexpand(true);
         controls.set_halign(gtk::Align::Fill);
-        controls.set_margin_start(52);
-        controls.set_margin_end(52);
-        controls.set_margin_bottom(20);
+        controls.set_margin_start(24);
+        controls.set_margin_end(24);
+        controls.set_margin_bottom(40);
 
         let spectrum = Rc::new(RefCell::new(Vec::new()));
         let waveform = waveform(spectrum.clone());
@@ -329,7 +337,7 @@ impl NowPlaying {
 
         let side = gtk::Box::new(gtk::Orientation::Vertical, 8);
         side.add_css_class("now-playing-side");
-        side.set_width_request(340);
+        side.set_width_request(280);
         side.set_hexpand(false);
         side.set_vexpand(true);
         side.set_visible(false);
@@ -496,6 +504,10 @@ impl NowPlaying {
             active_line: Cell::new(None),
             side,
             right_stack,
+            #[cfg(test)]
+            art,
+            #[cfg(test)]
+            controls,
             seek,
             position,
             duration,
